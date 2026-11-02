@@ -1,0 +1,22 @@
+# Manual edge overrides
+#
+# This is the "corriger à la main" mechanism. It is applied *after* extraction
+# and is versioned in git, so a hand correction is reviewable in a diff and
+# survives every re-run.
+#
+# Columns
+#   action    : add | remove | reweight
+#   source    : article title (must match a node)
+#   target    : article title
+#   relation  : generalisation | special_case | depends_on | equivalent |
+#               part_of | influenced_by
+#   confidence: 0..1 (used by `reweight`; ignored by add, which uses 1.0)
+#   reason    : why — this is for the human reading the diff, be specific
+#
+# Examples (left commented out on purpose: an empty override list is honest,
+# a list of invented corrections is not):
+#
+# add,Riemann hypothesis,Complex analysis,depends_on,1.0,The hypothesis is stated over the complex plane and its zeros are studied analytically
+# remove,Adsorption,Surface,depends_on,,Resolved from \"follows from surface energy\": physics, not a mathematical dependency
+#
+action,source,target,relation,confidence,reason

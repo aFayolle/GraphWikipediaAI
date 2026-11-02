@@ -30,6 +30,7 @@ from mathkg import (
     color,
     config,
     curriculum,
+    edges,
     export,
     fetch,
     graph,
@@ -151,6 +152,10 @@ def stage_scope(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform sign
     scope.run()
 
 
+def stage_edges(args: argparse.Namespace) -> None:
+    edges.run(use_wikidata=not args.no_wikidata)
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -217,6 +222,7 @@ STAGES = {
     "build": (stage_build, "build, colour and export the graph"),
     "render": (stage_render, "render a static PNG of the graph (for review)"),
     "scope": (stage_scope, "classify items, fold duplicates, write the scoping report"),
+    "edges": (stage_edges, "extract dependency edges (phrase + Wikidata)"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
@@ -251,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--labels", type=int, default=40, help="how many top-degree nodes to label"
+    )
+    parser.add_argument(
+        "--no-wikidata",
+        action="store_true",
+        help="edges stage: skip the Wikidata extractor (phrase edges only, no network)",
     )
     parser.add_argument(
         "--largest-component",
