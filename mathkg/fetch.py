@@ -77,7 +77,36 @@ class MediaWikiClient:
 
     # -- one API call ------------------------------------------------------- #
 
+    _TRANSIENT_ERRORS = frozenset({"maxlag", "readonly", "ratelimited"})
+
+    def _call(self, params: dict) -> dict:
+        """One request, retrying the API's own "come back later" errors."""
+        payload = self.session.get_json(self.api_url, params)
+        attempts = 0
+        while (
+            payload.get("error", {}).get("code") in self._TRANSIENT_ERRORS
+            and attempts < self.session.max_retries
+        ):
+            attempts += 1
+            log.warning("API asked us to back off (%s)", payload["error"]["code"])
+            self.session._sleep(5.0)
+            payload = self.session.get_json(self.api_url, params)
+        if "error" in payload:
+            raise RuntimeError(f"API error: {payload['error']}")
+        return payload
+
     def _query(self, titles: list[str]) -> dict:
+        """Query a batch, following continuations until every link is collected.
+
+        ``prop=links`` returns at most 500 links per page per response, so a
+        single batch of 20 titles needs many round-trips. Each response repeats
+        the page list but only carries the links covered so far, so the results
+        must be *merged per title* while iterating.
+
+        (This used to return the last continuation payload and silently discard
+        everything accumulated, which is why most articles came back with zero
+        links.)
+        """
         params = {
             "action": "query",
             "format": "json",
@@ -94,38 +123,35 @@ class MediaWikiClient:
             "titles": "|".join(titles),
         }
 
-        payload = self.session.get_json(self.api_url, params)
+        first = self._call(params)
+        # `normalized` and `redirects` only appear in the first response.
+        merged: dict[str, dict] = {}
 
-        # `maxlag` and read-only errors are transient by design: retry them.
-        while "error" in payload and payload["error"].get("code") in {
-            "maxlag",
-            "readonly",
-            "ratelimited",
-        }:
-            log.warning("API asked us to back off (%s)", payload["error"]["code"])
-            self.session._sleep(5.0)
-            payload = self.session.get_json(self.api_url, params)
-
-        if "error" in payload:
-            raise RuntimeError(f"API error: {payload['error']}")
-
-        # Continue fetching link pages for the batch.
-        links_by_title: dict[str, list[str]] = {}
+        payload = first
         while True:
-            query = payload.get("query", {})
-            for page in query.get("pages", []):
+            for page in payload.get("query", {}).get("pages", []):
                 if page.get("missing") or page.get("ns") != 0:
                     continue
-                links_by_title.setdefault(page["title"], []).extend(
-                    link["title"] for link in page.get("links", [])
+                title = normalise_title(page["title"])
+                slot = merged.setdefault(
+                    title, {key: value for key, value in page.items() if key != "links"}
                 )
+                slot.setdefault("links", []).extend(page.get("links", []))
+
             if "continue" not in payload:
                 break
             follow = dict(params)
             follow.update(payload["continue"])
-            payload = self.session.get_json(self.api_url, follow)
+            payload = self._call(follow)
 
-        return payload
+        return {
+            "query": {
+                "normalized": first.get("query", {}).get("normalized", []),
+                "redirects": first.get("query", {}).get("redirects", []),
+                "pages": list(merged.values()),
+            },
+            "limits": first.get("limits", {}),
+        }
 
     # -- public ------------------------------------------------------------- #
 
