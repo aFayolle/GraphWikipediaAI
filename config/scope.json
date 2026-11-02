@@ -1,0 +1,45 @@
+{
+  "type_roots": {
+    "Q65943": "theorem",
+    "Q207505": "lemma",
+    "Q319141": "conjecture",
+    "Q1166625": "problem",
+    "Q748349": "structure",
+    "Q1851710": "structure",
+    "Q123410745": "object",
+    "Q1936384": "field",
+    "Q246672": "object",
+    "Q24034552": "concept",
+    "Q8366": "algorithm",
+    "Q186509": "constant",
+    "Q11563": "number",
+    "Q163875": "number",
+    "Q47460393": "number",
+    "Q11862829": "academic discipline",
+    "Q1047113": "field of study",
+    "Q3924032": "property",
+    "Q6498784": "expression",
+    "Q11424": "publication",
+    "Q7397": "software",
+    "Q3331189": "publication"
+  },
+  "statement_kinds": [
+    "conjecture",
+    "lemma",
+    "theorem"
+  ],
+  "notion_kinds": [
+    "concept",
+    "constant",
+    "expression",
+    "field",
+    "number",
+    "object",
+    "property",
+    "structure"
+  ],
+  "excluded_kinds": [
+    "publication",
+    "software"
+  ]
+}

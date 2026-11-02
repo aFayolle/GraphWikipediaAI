@@ -26,7 +26,17 @@ from pathlib import Path
 import networkx as nx
 import pandas as pd
 
-from mathkg import color, config, curriculum, export, fetch, graph, render, wikidata
+from mathkg import (
+    color,
+    config,
+    curriculum,
+    export,
+    fetch,
+    graph,
+    render,
+    scope,
+    wikidata,
+)
 
 log = logging.getLogger("run")
 
@@ -137,6 +147,10 @@ def stage_render(args: argparse.Namespace) -> None:
     log.info("rendered %s", out)
 
 
+def stage_scope(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
+    scope.run()
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -202,6 +216,7 @@ STAGES = {
     "fetch": (stage_fetch, "fetch pages/links through the MediaWiki API (network)"),
     "build": (stage_build, "build, colour and export the graph"),
     "render": (stage_render, "render a static PNG of the graph (for review)"),
+    "scope": (stage_scope, "classify items, fold duplicates, write the scoping report"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
