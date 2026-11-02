@@ -26,7 +26,7 @@ from pathlib import Path
 import networkx as nx
 import pandas as pd
 
-from mathkg import color, config, curriculum, export, fetch, graph, wikidata
+from mathkg import color, config, curriculum, export, fetch, graph, render, wikidata
 
 log = logging.getLogger("run")
 
@@ -57,7 +57,14 @@ def _load_fields() -> pd.DataFrame | None:
     return graph.load_fields(path)
 
 
-def stage_build(args: argparse.Namespace) -> None:
+def _colored_graph(
+    args: argparse.Namespace,
+) -> tuple[nx.DiGraph, list[str], dict[str, list[int | None]]]:
+    """Load, build and colour the article graph.
+
+    Shared by `build` and `render` so a picture can never come from a different
+    graph than the artifacts.
+    """
     for path in (config.NODES_CSV, config.LINKS_CSV):
         if not path.exists():
             sys.exit(f"missing {path}: run `wikidata` + `fetch`, or `import-legacy`, first")
@@ -71,9 +78,15 @@ def stage_build(args: argparse.Namespace) -> None:
         nodes, links, anchors=set(anchor_list), max_degree=args.max_degree
     )
 
-    order, distances = [], {}
+    order: list[str] = []
+    distances: dict[str, list[int | None]] = {}
     if anchor_list:
         order, distances = color.color_graph(article_graph, anchors=anchor_list)
+    return article_graph, order, distances
+
+
+def stage_build(args: argparse.Namespace) -> None:
+    article_graph, order, distances = _colored_graph(args)
 
     log.info("graph summary: %s", graph.summary(article_graph))
     log.info("graph shape: %s", graph.shape_metrics(article_graph))
@@ -87,6 +100,41 @@ def stage_build(args: argparse.Namespace) -> None:
         pyvis=not args.no_html,
     )
     verify_artifacts(article_graph, written)
+
+
+def field_legend(order: list[str]) -> list[tuple[str, str]]:
+    """(field, colour) pairs for the figure legend, matching the palette order."""
+    palette = config.ANCHOR_PALETTE
+    legend = [(field, palette[i % len(palette)]) for i, field in enumerate(order)]
+    legend.append(("no reachable field", config.UNREACHABLE_COLOR))
+    return legend
+
+
+RENDER_VIEWS = ("fields",)
+
+
+def stage_render(args: argparse.Namespace) -> None:
+    """Render a static PNG (the channel through which I can look at the graph)."""
+    if args.view not in RENDER_VIEWS:
+        sys.exit(f"unknown view {args.view!r}; available: {', '.join(RENDER_VIEWS)}")
+
+    article_graph, order, distances = _colored_graph(args)
+    stats = graph.summary(article_graph)
+
+    out = render.render_graph(
+        article_graph,
+        config.ARTIFACT_DIR / "render" / f"{args.view}.png",
+        title=f"Fields of mathematics — {args.view} view",
+        subtitle=(
+            f"{stats['nodes']:,} articles · {stats['edges']:,} links · "
+            f"{stats['components']:,} components · "
+            f"colour = distance to the 12 field anchors"
+        ),
+        legend=field_legend(order),
+        label_top=args.labels,
+        only_largest_component=args.largest_component,
+    )
+    log.info("rendered %s", out)
 
 
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
@@ -153,6 +201,7 @@ STAGES = {
     "import-legacy": (stage_import_legacy, "rebuild intermediates from df_filtered.csv"),
     "fetch": (stage_fetch, "fetch pages/links through the MediaWiki API (network)"),
     "build": (stage_build, "build, colour and export the graph"),
+    "render": (stage_render, "render a static PNG of the graph (for review)"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
@@ -179,6 +228,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--no-html", action="store_true", help="skip the pyvis HTML (slow on big graphs)"
+    )
+    parser.add_argument(
+        "--view",
+        default="fields",
+        help=f"which view to render: {', '.join(RENDER_VIEWS)}",
+    )
+    parser.add_argument(
+        "--labels", type=int, default=40, help="how many top-degree nodes to label"
+    )
+    parser.add_argument(
+        "--largest-component",
+        action="store_true",
+        help="render only the biggest connected component",
     )
 
     sub = parser.add_subparsers(dest="stage", required=True)

@@ -54,6 +54,7 @@ TITLES_PER_REQUEST = 20      # extracts are limited to 20 titles per query
 # Graph / rendering tunables
 # --------------------------------------------------------------------------- #
 
+LAYOUT_SEED = 42                     # fixed so two renders are comparable
 DEFAULT_MAX_DEGREE: int | None = None  # None = keep everything
 ANCHOR_NEIGHBOURS = 3                  # how many anchors a node is coloured from
 UNREACHABLE_COLOR = "#B0B0B0"          # grey: no path to any anchor

@@ -9,5 +9,10 @@ networkx>=3.2,<4.0
 pyvis>=0.3.2,<0.4
 requests>=2.31,<3.0
 
+# Static rendering (mathkg/render.py): matplotlib for the PNG, scipy for the
+# sparse spring layout (networkx needs it above ~500 nodes).
+matplotlib>=3.8
+scipy>=1.11
+
 # Development / tests
 pytest>=8.0
