@@ -1,0 +1,39 @@
+"?" pour dire pas sur d'avoir compris
+
+SELECT ?oeuvre ?oeuvreLabel
+WHERE
+{
+  ?oeuvre wdt:P31/wdt:P279* wd:Q838948. # instance de n'importe quelle sous-classe d'une œuvre d'art
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],mul,en". }
+}
+
+SELECT ?petitEnfant ?petitEnfantLabel
+WHERE
+{
+  wd:Q1339 wdt:P40 [ wdt:P40 ?petitEnfant ].  #variable anonyme, 
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],mul,en". }
+}
+==
+wd:Q1339 wdt:P40/wdt:P40 ?petitEnfant.
+
+?Une astérisque (*) après un maillon de chemin signifie « zéro ou plus de ce maillon ».
+?Un plus (+) est similaire à une astérisque, mais signifie "un" ou plus d'un maillon. La requête suivante trouve tous les descendants de Bach :
+
+Jusque la on ne parlait que des relations entre les noeuds,
+on peut aussi intégrer des conditions sur le noeuds lui meme.
+
+wd:Q12418 p:P186 ?déclaration1.    # Mona Lisa : matériau utilisé : ?
+
+OPTIONAL { ?livre wdt:P1476 ?titre. }
+
+  FILTER("2015-01-01"^^xsd:dateTime <= ?ddn && ?ddn < "2016-01-01"^^xsd:dateTime).
+FILTER(!REGEX(STR(?chaîne), "^[A-Za-z][-.0-9A-Za-z]{1,}$"))
+
+BIND(?ageEnJours/365.2425 AS ?ageEnAnnees).
+La fonction COALESCE est utile comme abbréviation du motif BIND(IF(BOUND(?x), ?x, ?y) AS ?z).
+
+GROUP BY ?pays
+HAVING(COUNT(?livre) > 1)
+?VALUES
+VALUES (?élément ?persoÉlémentLabel) { (wd:Q937 "Einstein") (wd:Q1339 "Bach") }
+requete imbriqué

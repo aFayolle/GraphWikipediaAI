@@ -1,0 +1,19 @@
+SELECT DISTINCT
+  ?inventor ?inventorLabel
+  ?invention ?inventionLabel
+WHERE {
+  # 1) On prend des inventions (ou sous-classes d'invention)
+  ?invention wdt:P31/wdt:P279* wd:Q1183543 .  # Q1183543 = "invention"
+
+  # 2) On prend leurs inventeurs
+  ?invention wdt:P61 ?inventor .             # P61 = inventor
+
+  # 3) On s'assure que l'inventeur est un humain
+  ?inventor wdt:P31 wd:Q5 .                  # Q5 = human
+
+  # 4) Labels lisibles
+  SERVICE wikibase:label {
+    bd:serviceParam wikibase:language "[AUTO_LANGUAGE],fr,en" .
+  }
+}
+LIMIT 500
