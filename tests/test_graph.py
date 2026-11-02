@@ -6,7 +6,7 @@ import networkx as nx
 import pandas as pd
 import pytest
 
-from mathkg.graph import build_graph, cap_degree, node_size, summary
+from mathkg.graph import build_graph, cap_degree, node_size, shape_metrics, summary
 
 
 def nodes_df(rows):
@@ -133,3 +133,23 @@ def test_summary_counts(triangle):
     assert stats["self_loops"] == 0
     assert stats["isolated"] == 1
     assert stats["largest_component"] == 3
+
+
+def test_shape_metrics_reports_small_world_resolution():
+    """The colouring has as many levels as the graph has distances."""
+    chain = nx.path_graph(6)  # a - b - c - d - e - f
+    metrics = shape_metrics(chain, sample_sources=6)
+
+    assert metrics["largest_component"] == 6
+    assert metrics["max_eccentricity"] == 5
+    assert metrics["distance_histogram"][1] > 0
+    assert 0.0 <= metrics["share_within_4_hops"] <= 1.0
+
+
+def test_shape_metrics_is_deterministic():
+    graph = nx.gnp_random_graph(40, 0.15, seed=1)
+    assert shape_metrics(graph, sample_sources=10) == shape_metrics(graph, sample_sources=10)
+
+
+def test_shape_metrics_handles_empty_graph():
+    assert shape_metrics(nx.DiGraph()) == {"largest_component": 0}

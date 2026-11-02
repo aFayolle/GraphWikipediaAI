@@ -76,6 +76,7 @@ def stage_build(args: argparse.Namespace) -> None:
         order, distances = color.color_graph(article_graph, anchors=anchor_list)
 
     log.info("graph summary: %s", graph.summary(article_graph))
+    log.info("graph shape: %s", graph.shape_metrics(article_graph))
 
     written = export.export_all(
         article_graph,

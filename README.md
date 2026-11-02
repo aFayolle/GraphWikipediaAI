@@ -162,7 +162,19 @@ The original code was three scripts (`download_raw_data.py`, `enrichment.py`,
 
 ## Known limitations — read before publishing a figure
 
-1. **Two different edge definitions exist, and only one of them was ever
+1. **The colouring has about three usable levels, and that is a property of the
+   graph, not of the code.** Measured on the current data (`run.py build` prints
+   this as `graph shape`): 95.8% of node pairs are within 4 hops, 51.3% are
+   exactly 3 hops. So "distance to the 12 anchors" collapses to `d ∈ {1,2,3,4}`
+   and **most nodes tie between several anchors**. Ties are broken
+   deterministically by anchor order, which is why `Algebra` (first row of
+   `fields_of_math.csv`) ends up as the nearest field for 2,305 of 5,968 nodes.
+   A distance-based colouring is honest but coarse on a small-world graph; if
+   you want graded separation, the next step is a continuous proximity measure
+   (**personalised PageRank** from each anchor, or distance-weighted path
+   counts) rather than BFS hops. That is a method change, not a bug fix, so it
+   is not applied here.
+2. **Two different edge definitions exist, and only one of them was ever
    documented.** The original scraper extracted links from
    `re.search('From Wikipedia…(<p>.*?<h2)')`, i.e. **only the lead section and
    infobox**, and any layout change produced a silent empty node after three
@@ -172,12 +184,12 @@ The original code was three scripts (`download_raw_data.py`, `enrichment.py`,
    - `fetch` → real article links.
 
    Pick one deliberately and say which in the caption.
-2. **`P6104` means "maintained by WikiProject Mathematics"**, not "is
+3. **`P6104` means "maintained by WikiProject Mathematics"**, not "is
    mathematics". The dataset legitimately contains `triskaidekaphobia`,
    `Go (game)` and `magnet`. The old keyword filter that tried to fix this
    (`filtrer()`) only ever existed in commented-out code and has not been
    reintroduced — a `filter` stage is the natural next step.
-3. **The degree-cap question is open.** On this graph a cap of 20 drops 1,150
+4. **The degree-cap question is open.** On this graph a cap of 20 drops 1,150
    nodes and shatters the graph into ~1,600 components. The default is
    therefore "keep everything".
 4. **No temporal dimension.** The notes in `Historique de pensée.txt` aim at

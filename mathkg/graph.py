@@ -18,6 +18,9 @@ from __future__ import annotations
 
 import logging
 import math
+import random
+import statistics
+from collections import Counter
 from pathlib import Path
 
 import networkx as nx
@@ -208,4 +211,46 @@ def summary(graph: nx.Graph) -> dict[str, float | int]:
         "isolated": sum(1 for _, deg in graph.degree() if deg == 0),
         "components": len(components),
         "largest_component": max((len(c) for c in components), default=0),
+    }
+
+
+def shape_metrics(
+    graph: nx.Graph, sample_sources: int = 200, seed: int = 0
+) -> dict[str, object]:
+    """Sampled distance statistics -- the resolution limit of the colouring.
+
+    Worth computing on every run: this graph is small-world, so 96% of node
+    pairs are 2-4 hops apart. Distance-to-anchor therefore carries only about
+    three usable levels, which is why so many nodes share a colour and why
+    ties between anchors are the norm rather than the exception. Exact
+    diameter is O(n*m) and takes minutes on 5k nodes; sampling is enough to
+    see the shape and stays deterministic (seeded).
+    """
+    undirected = graph.to_undirected()
+    components = sorted(nx.connected_components(undirected), key=len, reverse=True)
+    if not components:
+        return {"largest_component": 0}
+
+    largest = undirected.subgraph(components[0])
+    nodes = list(largest.nodes)
+    sources = random.Random(seed).sample(nodes, min(sample_sources, len(nodes)))
+
+    histogram: Counter[int] = Counter()
+    eccentricities: list[int] = []
+    for source in sources:
+        lengths = nx.single_source_shortest_path_length(largest, source)
+        histogram.update(lengths.values())
+        eccentricities.append(max(lengths.values()))
+
+    total = sum(histogram.values()) or 1
+    within_4 = sum(count for distance, count in histogram.items() if 0 < distance <= 4)
+    return {
+        "largest_component": largest.number_of_nodes(),
+        "sampled_sources": len(sources),
+        "median_eccentricity": statistics.median(eccentricities),
+        "max_eccentricity": max(eccentricities),
+        "share_within_4_hops": round(within_4 / total, 3),
+        "distance_histogram": {
+            distance: round(count / total, 3) for distance, count in sorted(histogram.items())
+        },
     }
