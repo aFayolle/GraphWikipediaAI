@@ -280,6 +280,147 @@ def phrase_edges(
 
 
 # --------------------------------------------------------------------------- #
+# Proof-section extractor
+# --------------------------------------------------------------------------- #
+# A link that appears *inside* a "Proof" or "Derivation" section is a far better
+# ``depends_on`` candidate than one in the lead: it is machinery the argument
+# actually uses. Measured on five statements, proof sections hold 10-45 of the
+# 44-262 links on the page, so this is the densifier with the best
+# signal-to-effort ratio -- and the titles match the graph by construction,
+# unlike Metamath or mathlib where a name-mapping table would be needed.
+
+PROOF_HEADING = re.compile(
+    r"(proof|derivation|demonstration|justification|outline of (?:the )?proof)", re.I
+)
+
+# A heading is only usable if it is a proof of *this* article. "Proof of
+# Mertens' theorem" inside `Cauchy product`, or "Other proofs of the theorem"
+# inside `Pythagorean theorem`, contain links that are prerequisites of some
+# *other* result -- which produced confidently wrong edges in the first audit.
+PROOF_OF_SOMETHING = re.compile(r"proof of\s+(?:the\s+)?(.+)", re.I)
+ARGUMENTATIVE = re.compile(r"alleged|impossibility|refut|disproof|paradox|criticism", re.I)
+GENERIC_OBJECT = {"the theorem", "the result", "the rule", "the lemma", "the claim",
+                  "the statement", "the proposition", "the corollary", "this theorem",
+                  "the identity", "the inequality", "the formula"}
+
+
+def _is_own_proof(heading: str, source: str) -> bool:
+    """Is this section a proof of ``source`` rather than of something else?"""
+    if ARGUMENTATIVE.search(heading):
+        return False
+    match = PROOF_OF_SOMETHING.search(heading)
+    if not match:
+        return True
+    object_of_proof = " ".join(match.group(1).lower().split())
+    if object_of_proof in GENERIC_OBJECT:
+        return True
+    needle = object_of_proof.strip("'\"")
+    haystack = source.lower()
+    return needle in haystack or haystack in needle
+WIKITEXT_BATCH = 10
+WIKITEXT_CACHE = config.CACHE_DIR / "wikipedia_wikitext"
+
+
+def _wikitext_cache_path(titles: list[str]) -> Path:
+    WIKITEXT_CACHE.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha1("\n".join(titles).encode("utf-8")).hexdigest()[:16]
+    return WIKITEXT_CACHE / f"{digest}.json"
+
+
+def fetch_wikitext(
+    titles: list[str], session: PolitenessSession | None = None, use_cache: bool = True
+) -> dict[str, str]:
+    """Latest revision source of each article, batched and cached."""
+    owns = session is None
+    session = session or PolitenessSession()
+    out: dict[str, str] = {}
+    total = len(titles)
+    try:
+        for batch in _batched(sorted(set(titles)), WIKITEXT_BATCH):
+            cache_file = _wikitext_cache_path(batch)
+            if use_cache and cache_file.exists():
+                out.update(json.loads(cache_file.read_text(encoding="utf-8")))
+                continue
+            payload = session.get_json(
+                config.WIKI_API_URL.format(lang=config.WIKI_LANG),
+                {
+                    "action": "query",
+                    "format": "json",
+                    "formatversion": "2",
+                    "prop": "revisions",
+                    "rvslots": "main",
+                    "rvprop": "content",
+                    "redirects": "1",
+                    "titles": "|".join(batch),
+                },
+            )
+            chunk: dict[str, str] = {}
+            for page in payload.get("query", {}).get("pages", []):
+                if page.get("missing"):
+                    continue
+                revisions = page.get("revisions") or []
+                if not revisions:
+                    continue
+                chunk[page["title"]] = revisions[0]["slots"]["main"]["content"]
+            if use_cache:
+                cache_file.write_text(json.dumps(chunk), encoding="utf-8")
+            out.update(chunk)
+            log.info("wikitext: %d/%d pages", min(len(out), total), total)
+    finally:
+        if owns:
+            session.close()
+    return out
+
+
+def split_sections(wikitext: str) -> list[tuple[str, str]]:
+    """Split article source into (heading, body) pairs on level 2-3 headings."""
+    parts = re.split(r"\n(=={1,3})\s*(.+?)\s*\1\s*\n", wikitext)
+    sections = [("(lead)", parts[0])]
+    for index in range(1, len(parts) - 2, 3):
+        sections.append((parts[index + 1], parts[index + 2]))
+    return sections
+
+
+LINK = re.compile(r"\[\[([^\]|]+)")
+
+
+def proof_section_edges(
+    wikitexts: dict[str, str], titles: list[str]
+) -> list[Edge]:
+    """``depends_on`` edges from links inside proof/derivation sections."""
+    from .titles import article_titles, normalise_title
+
+    lookup = {title.lower(): title for title in titles}
+    edges: list[Edge] = []
+
+    for source, wikitext in wikitexts.items():
+        if not wikitext:
+            continue
+        for heading, body in split_sections(wikitext):
+            if not PROOF_HEADING.search(heading):
+                continue
+            if not _is_own_proof(heading, source):
+                continue
+            confidence = 0.75 if re.search(r"proof", heading, re.I) else 0.6
+            targets = article_titles([normalise_title(m) for m in LINK.findall(body)])
+            for target in targets:
+                resolved = lookup.get(target.lower())
+                if not resolved or resolved == source:
+                    continue
+                edges.append(
+                    Edge(
+                        source=source,
+                        target=resolved,
+                        relation="depends_on",
+                        extractor="proof_section",
+                        confidence=confidence,
+                        evidence=f"link inside section '{heading.strip()}'",
+                    )
+                )
+    return edges
+
+
+# --------------------------------------------------------------------------- #
 # Manual overrides
 # --------------------------------------------------------------------------- #
 
@@ -388,7 +529,32 @@ def load_summaries(path: Path = config.LEGACY_ENRICHED_CSV) -> tuple[dict[str, s
 # Stage
 # --------------------------------------------------------------------------- #
 
-def run(use_wikidata: bool = True, use_cache: bool = True) -> pd.DataFrame:
+def core_titles(max_titles: int | None = None) -> list[str]:
+    """Titles of the typed core (statement + notion items), largest first."""
+    if not scope_core_exists():
+        return []
+    core = pd.read_csv(scope_core_path(), dtype=str)
+    nodes = pd.read_csv(config.NODES_CSV, dtype=str, keep_default_na=False)
+    title_by_qid = dict(zip(nodes["qid"], nodes["title"], strict=False))
+    titles = [title_by_qid[q] for q in core["qid"] if q in title_by_qid]
+    titles = sorted({t for t in titles if t})
+    return titles[:max_titles] if max_titles else titles
+
+
+def scope_core_path():
+    return config.RAW_DIR / "core_nodes.csv"
+
+
+def scope_core_exists() -> bool:
+    return scope_core_path().exists()
+
+
+def run(
+    use_wikidata: bool = True,
+    use_proof_sections: bool = True,
+    use_cache: bool = True,
+    max_proof_titles: int | None = None,
+) -> pd.DataFrame:
     """Extract every edge the funnel can afford, then write data/raw/edges.csv.
 
     Extraction is deliberately wide; narrowing happens in the views. The funnel
@@ -405,13 +571,26 @@ def run(use_wikidata: bool = True, use_cache: bool = True) -> pd.DataFrame:
     out = phrase_edges(summaries, titles)
     log.info("phrase edges: %d", len(out))
 
+    title_lookup = {t.lower(): t for t in nodes["title"] if t}
+
     if use_wikidata:
         qids = [q for q in nodes["qid"].dropna().unique()]
-        title_lookup = {t.lower(): t for t in nodes["title"] if t}
         with PolitenessSession() as session:
             out += wikidata_edges(
                 qids, title_by_qid, session, use_cache=use_cache, title_lookup=title_lookup
             )
+
+    if use_proof_sections:
+        targets = core_titles(max_proof_titles)
+        if not targets:
+            log.warning("no core_nodes.csv: run `run.py scope` first; skipping proof sections")
+        else:
+            log.info("proof sections: fetching wikitext for %d core titles", len(targets))
+            with PolitenessSession() as session:
+                texts = fetch_wikitext(targets, session, use_cache=use_cache)
+            proof = proof_section_edges(texts, titles)
+            log.info("proof-section edges: %d", len(proof))
+            out += proof
 
     known = set(titles)
     out, override_stats = apply_overrides(out, known_titles=known)

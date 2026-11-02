@@ -153,7 +153,7 @@ def stage_scope(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform sign
 
 
 def stage_edges(args: argparse.Namespace) -> None:
-    edges.run(use_wikidata=not args.no_wikidata)
+    edges.run(use_wikidata=not args.no_wikidata, use_proof_sections=not args.no_proof)
 
 
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
@@ -257,6 +257,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--labels", type=int, default=40, help="how many top-degree nodes to label"
+    )
+    parser.add_argument(
+        "--no-proof",
+        action="store_true",
+        help="edges stage: skip the proof-section extractor (no wikitext fetching)",
     )
     parser.add_argument(
         "--no-wikidata",
