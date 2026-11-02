@@ -1,0 +1,13 @@
+# Runtime dependencies for the pipeline.
+# Versions pinned to a range that is known to work together (verified with
+# pandas 2.3.3 / networkx 3.7 / pyvis 0.3.2 on Python 3.13).
+#
+# NOTE: networkx >= 3.0 removed read_gpickle/write_gpickle. The old
+# `show_graph_from_file()` relied on it and cannot work on any current version.
+pandas>=2.0,<3.0
+networkx>=3.2,<4.0
+pyvis>=0.3.2,<0.4
+requests>=2.31,<3.0
+
+# Development / tests
+pytest>=8.0
