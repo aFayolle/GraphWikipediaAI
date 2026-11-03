@@ -226,6 +226,7 @@ class ViewerState:
                     "y": y,
                     "size": self._size_for(node),
                     "color": colours.get(node, "#4E79A7"),
+                    "degree": int(self.graph.degree(node)),
                     "font_size": font,
                 }
             )
