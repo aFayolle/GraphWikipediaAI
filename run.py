@@ -419,8 +419,10 @@ def stage_gephi_layout(args: argparse.Namespace) -> None:
     command = [
         "java", "-cp", str(jar), str(source_java),
         str(gexf), str(tsv), str(args.iterations), "true" if args.linlog else "false",
+        "true" if args.from_scratch else "false",
     ]
-    log.info("running Gephi Toolkit: %d iterations (linlog=%s)", args.iterations, args.linlog)
+    log.info("running Gephi Toolkit: %d iterations (linlog=%s, from_scratch=%s)",
+             args.iterations, args.linlog, args.from_scratch)
     result = subprocess.run(command, capture_output=True, text=True, timeout=600)
     for line in (result.stdout or "").splitlines():
         if line.startswith("Gephi") or line.startswith("wrote"):
@@ -557,6 +559,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gexf", default="", help="import-layout: GEXF file to read positions from")
     parser.add_argument("--iterations", type=int, default=300, help="gephi-layout: ForceAtlas2 iterations")
     parser.add_argument("--linlog", action="store_true", help="gephi-layout: ForceAtlas2 LinLog mode")
+    parser.add_argument("--from-scratch", action="store_true",
+                        help="gephi-layout: randomise first instead of continuing the imported layout")
     parser.add_argument("--node", default="", help="ego/describe: the notion")
     parser.add_argument("--from", dest="source", default="", help="path: starting notion")
     parser.add_argument("--to", dest="target", default="", help="path: target notion")
@@ -600,7 +604,7 @@ def build_parser() -> argparse.ArgumentParser:
 #: normalised instead of documented and hoped for.
 GLOBAL_FLAGS = {
     "--verbose", "--no-html", "--largest-component", "--no-wikidata", "--no-proof",
-    "--include-classification", "--linlog",
+    "--include-classification", "--linlog", "--from-scratch",
 }
 GLOBAL_VALUED = {
     "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",

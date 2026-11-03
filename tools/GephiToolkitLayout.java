@@ -35,6 +35,7 @@ public class GephiToolkitLayout {
         File output = new File(args[1]);
         int iterations = args.length > 2 ? Integer.parseInt(args[2]) : 500;
         boolean linLog = args.length > 3 && Boolean.parseBoolean(args[3]);
+        boolean randomize = args.length > 4 && Boolean.parseBoolean(args[4]);
 
         ProjectController projectController = Lookup.getDefault().lookup(ProjectController.class);
         projectController.newProject();
@@ -52,6 +53,19 @@ public class GephiToolkitLayout {
         Graph graph = graphModel.getGraph();
         System.out.println("Gephi loaded " + graph.getNodeCount() + " nodes, "
                 + graph.getEdgeCount() + " edges");
+
+        if (randomize) {
+            // Gephi's FA2 derives its forces from the current positions. Files that
+            // already carry coordinates therefore *continue* that layout; with all
+            // nodes at the origin the forces are zero. Spread them out first so the
+            // run is genuinely from scratch. Fixed seed => reproducible.
+            java.util.Random rng = new java.util.Random(42L);
+            for (Node node : graph.getNodes()) {
+                node.setX((float) (rng.nextGaussian() * 100.0));
+                node.setY((float) (rng.nextGaussian() * 100.0));
+            }
+            System.out.println("randomised initial positions (seed 42)");
+        }
 
         ForceAtlas2Builder builder = new ForceAtlas2Builder();
         ForceAtlas2 layout = builder.buildLayout();

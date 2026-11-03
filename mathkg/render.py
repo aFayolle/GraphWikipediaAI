@@ -72,6 +72,22 @@ def _graph_fingerprint(graph: nx.Graph, iterations: int, seed: int) -> str:
     return digest.hexdigest()[:16]
 
 
+def _installed_path(graph: nx.Graph, seed: int = config.LAYOUT_SEED) -> Path:
+    """Cache slot for positions supplied from outside (Gephi, a GEXF, a TSV).
+
+    Every layout reader checks this first. Without it, imported coordinates went
+    into the spring slot while the ForceAtlas2 renderer read its own ``_fa2``
+    slot -- so "installed 1560 positions" was true and the picture never changed.
+    """
+    LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
+    return LAYOUT_CACHE / f"{_graph_fingerprint(graph, 0, seed)}_installed.json"
+
+
+def _read_positions_file(path: Path) -> dict[str, tuple[float, float]]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return {node: (float(x), float(y)) for node, (x, y) in raw}
+
+
 def layout_graph(
     graph: nx.Graph,
     seed: int = config.LAYOUT_SEED,
@@ -85,6 +101,11 @@ def layout_graph(
     is what makes the iterate-and-look loop bearable.
     """
     LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
+    installed = _installed_path(graph, seed)
+    if use_cache and installed.exists():
+        log.info("layout: using installed positions (%s)", installed.name)
+        return _read_positions_file(installed)
+
     key = _graph_fingerprint(graph, iterations, seed)
     cache_file = LAYOUT_CACHE / f"{key}.json"
 
@@ -330,6 +351,11 @@ def forceatlas2_positions(
     driving its GUI.
     """
     LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
+    installed = _installed_path(graph, seed)
+    if use_cache and installed.exists():
+        log.info("layout: using installed positions (%s)", installed.name)
+        return _read_positions_file(installed)
+
     key = _graph_fingerprint(graph, max_iter, seed) + "_fa2"
     cache_file = LAYOUT_CACHE / f"{key}.json"
 
@@ -382,7 +408,6 @@ def positions_from_gexf(path: Path) -> dict[str, tuple[float, float]]:
 def install_positions(
     graph: nx.Graph,
     positions: dict[str, tuple[float, float]],
-    iterations: int = LAYOUT_ITERATIONS,
     seed: int = config.LAYOUT_SEED,
 ) -> Path:
     """Store positions as *the* layout for this graph.
@@ -400,8 +425,7 @@ def install_positions(
         node = raw_node if raw_node in graph else by_str.get(str(raw_node))
         if node is not None:
             relevant[node] = point
-    key = _graph_fingerprint(graph, iterations, seed)
-    cache_file = LAYOUT_CACHE / f"{key}.json"
+    cache_file = _installed_path(graph, seed)
     cache_file.write_text(
         json.dumps([[node, [float(x), float(y)]] for node, (x, y) in relevant.items()]),
         encoding="utf-8",
