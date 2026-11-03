@@ -18,6 +18,14 @@
       radial-gradient(circle at 12% 88%, rgba(231,111,81,.10) 0%, transparent 42%),
       radial-gradient(circle at 88% 12%, rgba(42,157,143,.10) 0%, transparent 42%);
   }
+  /* Always-on life: the field breathes. Pure CSS -- no canvas cost, so it
+     cannot lag and it still shows movement if the JS loop fails. */
+  @keyframes breathe {
+    0%   { transform: scale(1.00); opacity: .92; }
+    50%  { transform: scale(1.06); opacity: 1;   }
+    100% { transform: scale(1.00); opacity: .92; }
+  }
+  #bg { animation: breathe 18s ease-in-out infinite; }
   /* Faint vignette so the plane reads as a surface, not a void. */
   #bg::after {
     content: ""; position: absolute; inset: 0;
@@ -110,10 +118,12 @@ function initNetwork(usePhysics) {
 function startMotion(positions) {
   stopMotion();
   motion = new Map();
-  // Cap the animated set: moving 1,560 nodes every frame starves the page and
-  // makes screenshots and probes time out. Leaves and mid-degree nodes carry the
-  // "living" feel; hubs can stay put.
-  const pool = nodes.get().slice(0, 400);
+  // Cap hard. Moving 700+ nodes every frame saturated the renderer badly enough
+  // that headless Chromium died with EPIPE, and it will drop frames on a laptop
+  // too. 160 nodes at ~20 fps reads as "alive" without costing anything.
+  const all = nodes.get();
+  const byDegree = all.slice().sort((a, b) => (b.degree || 0) - (a.degree || 0));
+  const pool = byDegree.slice(0, 160);
   window.__motionNodes = pool.length;
   for (const node of pool) {
     const base = (positions && positions[node.id]) || { x: node.x, y: node.y };
@@ -137,7 +147,10 @@ function startMotion(positions) {
     const t = now / 1000;
 
     window.__motionTicks++;
-    if (!dragging) {
+    // ~20 fps: redraws are the expensive part, not the arithmetic.
+    if (window.__motionTicks % 3 !== 0) { rafId = requestAnimationFrame(step); return; }
+    if (!dragging && motion) {
+      try {
       motion.forEach((s, id) => {
         // Brownian component: small random impulses, exponentially damped.
         s.wx += (Math.random() - 0.5) * 0.9 * dt;
@@ -149,6 +162,10 @@ function startMotion(positions) {
         const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp + s.wy;
         network.moveNode(id, s.bx + dx, s.by + dy);
       });
+      } catch (err) {
+        // A single failure must not stop the animation silently.
+        setStatus("motion error: " + err.message);
+      }
     }
     rafId = requestAnimationFrame(step);
   };
