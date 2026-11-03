@@ -221,3 +221,93 @@ data/                   generated (gitignored): raw/, cache/, artifacts/
 `df_filtered.csv`, `wikiproject_math_nodes.csv` and `fields_of_math.csv` are
 kept at the repository root as the original inputs; the pipeline reads them but
 never overwrites them.
+
+---
+
+## The live loop
+
+Styling is a **document**, not code: a view spec holds expressions over node and
+edge columns, and a change costs one message to an open browser tab.
+
+```bash
+# 1. start the viewer once (holds the graph in memory)
+.venv/bin/python run.py serve                 # http://127.0.0.1:8765
+
+# 2. open it, leave it open
+xdg-open http://127.0.0.1:8765
+
+# 3. change the view from another terminal — the tab updates in place
+.venv/bin/python run.py set --set 'node.size=6 + 2.5 * degree'
+.venv/bin/python run.py set --set 'label.size=9' --set 'label.count=60'
+.venv/bin/python run.py set --set 'edge_weight.formula=occurrences * in_proof'
+```
+
+Each `set` prints the round trip the server measured (`POST /spec`: **57–62 ms**
+for 1,560 nodes) and the tab shows the apply latency it measured itself.
+
+### What can be expressed
+
+| column | available on |
+|---|---|
+| `degree`, `sitelinks`, `kind`, `is_anchor` | nodes |
+| `confidence`, `popularity`, `occurrences`, `relative_position`, `in_lead`, `in_proof` | edges |
+
+Expressions support `+ - * / **`, comparisons, `if/else`, and
+`min max abs sqrt log log10 exp floor ceil round pow`. No `eval`: unknown names,
+attribute access, subscripts and comprehensions are rejected — 12 hostile inputs
+are covered by tests, and the server answers 400 rather than storing a bad spec.
+
+The weighting from the brief, written out — occurrences, weighted by how early the
+mention appears, and *negatively* by the target's popularity:
+
+```yaml
+edge_weight:
+  formula: "occurrences * (1 - relative_position) / log(1 + popularity)"
+  minimum: 0.15
+```
+
+### Canned views
+
+```bash
+for v in views/*.yaml; do .venv/bin/python run.py --spec "$v" --out "data/artifacts/views/$(basename "$v" .yaml).png" view; done
+```
+
+| view | what it does |
+|---|---|
+| `degree_size` | node size ∝ degree |
+| `proof_weighted` | edges kept only if cited *inside a proof* (2026 → 1155 edges) |
+| `mention_weighted` | the formula above (2026 → 1649 edges) |
+| `hubs_only` | degree ≥ 4 (1,560 → 339 nodes) |
+
+### Queries
+
+```bash
+.venv/bin/python run.py ego --node "Topology" --radius 2        # 10 at 1 hop, 81 at 2
+.venv/bin/python run.py describe --node "Topology"              # counts + longest chain
+.venv/bin/python run.py path --from "Foundations of mathematics" \
+                           --to "Pythagorean theorem"
+```
+
+`path` reports **how** it found the chain: `directed` (a real prerequisite chain),
+`undirected` (direction mixed — a weaker claim, warned about), or `none`. For the
+foundations → Pythagoras case it honestly returns an undirected 4-step path,
+because no directed chain exists in the current edge set. That is a gap in the
+edges, not in the query.
+
+### MCP
+
+The same core is exposed over MCP for any client that speaks it:
+
+```bash
+.venv/bin/python -m mathkg.mcp_server            # JSON-RPC on stdin/stdout
+```
+
+Tools: `get_state`, `set_spec`, `filter`, `ego`, `path`, `describe`,
+`render_png`, `reload_graph`. Verified with a handshake, `tools/list`, a real
+`describe` call, and a hostile `set_spec` that is rejected.
+
+### Reverting a change
+
+Nothing is hidden in a database. A view lives in `views/<name>.yaml` or in a
+command you can re-run, so `git diff` shows exactly what changed and
+`git checkout views/` undoes it.

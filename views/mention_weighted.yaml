@@ -1,0 +1,19 @@
+# The formula from the brief: weighted by occurrences and by how early in the
+# page the mention appears, and *negatively* by how popular the target is
+# (a hub gets cited by everyone, so it carries less information).
+name: mention_weighted
+source: dependency
+layout: layered
+title: "Prerequisite DAG — weighted by position, occurrences, inversely by popularity"
+node:
+  size: "6 + 1.8 * degree"
+  color: "#EDC948"
+label:
+  count: 40
+  size: 7.0
+edge:
+  width: "0.3"
+  opacity: 0.35
+edge_weight:
+  formula: "occurrences * (1 - relative_position) / log(1 + popularity)"
+  minimum: 0.15

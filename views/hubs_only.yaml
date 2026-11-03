@@ -1,0 +1,18 @@
+# Strip everything with fewer than 4 neighbours: the spine of the graph.
+name: hubs_only
+source: dependency
+layout: layered
+title: "Prerequisite DAG — hubs only (degree >= 4)"
+node:
+  size: "8 + 3 * degree"
+  color: "#B07AA1"
+label:
+  count: 60
+  size: 8.0
+edge:
+  width: "0.4"
+  opacity: 0.4
+edge_weight:
+  formula: confidence
+filter:
+  min_degree: 4

@@ -1,0 +1,17 @@
+# Hub structure: big dots are notions many others depend on.
+name: degree_size
+source: dependency
+layout: layered
+title: "Prerequisite DAG — node size ∝ degree"
+node:
+  size: "6 + 2.2 * degree"
+  color: "#4E79A7"
+label:
+  count: 45
+  size: 7.0
+edge:
+  width: "0.25"
+  opacity: 0.22
+edge_weight:
+  formula: confidence
+  minimum: 0.0

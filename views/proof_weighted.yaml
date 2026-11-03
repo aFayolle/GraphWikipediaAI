@@ -1,0 +1,20 @@
+# Weight edges by how often the target is mentioned *inside a proof* of the
+# source: an edge that only appears in a "See also" section fades out.
+name: proof_weighted
+source: dependency
+layout: layered
+title: "Prerequisite DAG — edges weighted by proof mentions"
+node:
+  size: "5 + 1.5 * degree"
+  color: "#59A14F"
+label:
+  count: 35
+  size: 6.5
+edge:
+  width: "0.25"
+  opacity: 0.30
+edge_weight:
+  formula: "occurrences * in_proof"
+  minimum: 0.5
+filter:
+  min_degree: 0

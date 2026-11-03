@@ -7,6 +7,8 @@ the caller must be told, because the direction is then mixed.
 
 from __future__ import annotations
 
+import json
+
 import networkx as nx
 
 from mathkg.dependency import describe, ego_graph, path_between, shortest_path
@@ -100,3 +102,58 @@ def test_ego_respects_the_radius():
 
 def test_ego_of_absent_node_is_empty():
     assert ego_graph(chain_graph(), "nope").number_of_nodes() == 0
+
+
+# --- the MCP front end must not drift from the core -------------------------- #
+
+def test_mcp_handshake_and_tool_list():
+    from mathkg.mcp_server import MathKGServer, handle
+
+    server = MathKGServer(graph=chain_graph(), spec=None)
+    init = handle(server, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    assert init["result"]["protocolVersion"]
+    assert init["result"]["serverInfo"]["name"] == "mathkg"
+
+    listed = handle(server, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    names = {tool["name"] for tool in listed["result"]["tools"]}
+    assert names == {
+        "get_state", "set_spec", "filter", "ego", "path",
+        "describe", "render_png", "reload_graph",
+    }
+
+
+def test_mcp_describe_matches_the_core():
+    """Same graph in, same numbers out: the MCP path must not reinvent anything."""
+    from mathkg.mcp_server import MathKGServer, handle
+
+    graph = chain_graph()
+    server = MathKGServer(graph=graph, spec=None)
+    response = handle(server, {
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "describe", "arguments": {"node": "b"}},
+    })
+    payload = json.loads(response["result"]["content"][0]["text"])
+    assert payload == describe(graph, "b")
+
+
+def test_mcp_set_spec_rejects_hostile_input():
+    from mathkg.mcp_server import MathKGServer, handle
+
+    server = MathKGServer(graph=chain_graph(), spec=None)
+    response = handle(server, {
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "set_spec", "arguments": {"set": ["node.size=__import__('os')"]}},
+    })
+    assert "error" in response
+    assert "whitelisted" in response["error"]["message"]
+
+
+def test_mcp_ego_swaps_the_graph():
+    from mathkg.mcp_server import MathKGServer, handle
+
+    server = MathKGServer(graph=chain_graph(), spec=None)
+    handle(server, {
+        "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": {"name": "ego", "arguments": {"node": "b", "radius": 1}},
+    })
+    assert set(server.state.graph.nodes) == {"a", "b", "c"}
