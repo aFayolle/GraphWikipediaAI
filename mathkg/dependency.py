@@ -266,3 +266,80 @@ def enrich_with_attributes(graph: nx.DiGraph) -> nx.DiGraph:
         graph.nodes[node]["sitelinks"] = sitelinks.get(node, 0.0)
         graph.nodes[node]["kind"] = kind_by_title.get(node, "unknown")
     return graph
+
+
+# --------------------------------------------------------------------------- #
+# Queries
+# --------------------------------------------------------------------------- #
+
+def shortest_path(
+    graph: nx.DiGraph, source: str, target: str, directed: bool = True
+) -> list[str] | None:
+    """A path between two notions, or ``None`` if there is none.
+
+    Directed first (meaning "source is a prerequisite of target, possibly
+    indirectly"). If that fails we fall back to the undirected projection and
+    the caller is told, because an undirected path is a much weaker claim.
+    """
+    if source not in graph or target not in graph:
+        return None
+    working = graph if directed else graph.to_undirected()
+    try:
+        return nx.shortest_path(working, source, target)
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        return None
+
+
+def path_between(
+    graph: nx.DiGraph, source: str, target: str
+) -> tuple[list[str] | None, str]:
+    """Path plus an honest description of what kind of path it is."""
+    directed = shortest_path(graph, source, target, directed=True)
+    if directed:
+        return directed, "directed"
+    undirected = shortest_path(graph, source, target, directed=False)
+    if undirected:
+        return undirected, "undirected"
+    return None, "none"
+
+
+def describe(graph: nx.DiGraph, node: str, limit: int = 8) -> dict:
+    """Text summary of one notion: what it needs, what it enables, how deep."""
+    if node not in graph:
+        return {"node": node, "present": False}
+
+    prerequisites = nx.single_source_shortest_path_length(graph.reverse(copy=False), node)
+    enables = nx.single_source_shortest_path_length(graph, node)
+    immediate_in = sorted(graph.predecessors(node))
+    immediate_out = sorted(graph.successors(node))
+
+    # longest chain through the node, if the graph is acyclic
+    longest = []
+    try:
+        reduced = graph.copy()
+        if not nx.is_directed_acyclic_graph(reduced):
+            reduced, _ = break_cycles(reduced)
+        for ancestor in prerequisites:
+            for descendant in enables:
+                if ancestor == descendant:
+                    continue
+                try:
+                    candidate = nx.shortest_path(reduced, ancestor, descendant)
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    continue
+                if node in candidate and len(candidate) > len(longest):
+                    longest = candidate
+    except Exception:  # pragma: no cover - defensive
+        longest = []
+
+    return {
+        "node": node,
+        "present": True,
+        "in_degree": graph.in_degree(node),
+        "out_degree": graph.out_degree(node),
+        "prerequisites": len(prerequisites) - 1,
+        "enables": len(enables) - 1,
+        "immediate_prerequisites": immediate_in[:limit],
+        "immediate_enables": immediate_out[:limit],
+        "longest_chain_through": longest,
+    }

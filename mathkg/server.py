@@ -291,6 +291,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "invalid JSON"}, 400)
             return
 
+        if path == "/query":
+            self._handle_query(body)
+            return
+
         if path == "/spec":
             overrides = body.get("set") or []
             try:
@@ -301,6 +305,47 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, "version": message["version"], "detail": message["detail"]})
             return
         self._send_json({"error": "not found"}, 404)
+
+
+    def _handle_query(self, body: dict) -> None:
+        """ego / path / describe. ego and path also swap the displayed graph."""
+        from . import dependency
+
+        kind = str(body.get("kind", "")).strip().lower()
+        if kind == "describe":
+            node = str(body.get("node", ""))
+            self._send_json(dependency.describe(self.state.graph, node))
+            return
+        if kind == "ego":
+            node = str(body.get("node", ""))
+            radius = int(body.get("radius", 2))
+            if node not in self.state.graph:
+                self._send_json({"error": f"{node!r} is not in the graph"}, 400)
+                return
+            subgraph = nx.ego_graph(self.state.graph, node, radius=radius, undirected=True)
+            self.state.replace_graph(subgraph.copy())
+            distances = nx.single_source_shortest_path_length(
+                self.state.graph.to_undirected(), node
+            )
+            by_hop: dict[int, int] = {}
+            for distance in distances.values():
+                by_hop[distance] = by_hop.get(distance, 0) + 1
+            self._send_json({"kind": "ego", "node": node, "hops": by_hop})
+            return
+        if kind == "path":
+            source = str(body.get("from", ""))
+            target = str(body.get("to", ""))
+            chain, how = dependency.path_between(self.state.graph, source, target)
+            if chain is None:
+                self._send_json(
+                    {"kind": "path", "chain": None, "how": "none",
+                     "error": f"no path from {source!r} to {target!r}"},
+                    404,
+                )
+                return
+            self._send_json({"kind": "path", "chain": chain, "how": how, "steps": len(chain)})
+            return
+        self._send_json({"error": f"unknown query {kind!r}"}, 400)
 
     def _stream_events(self) -> None:
         self.send_response(200)

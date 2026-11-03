@@ -293,6 +293,69 @@ def stage_set(args: argparse.Namespace) -> None:
     log.info("pushed: %s", reply)
 
 
+def _dag() -> nx.DiGraph:
+    edges_frame = dependency.load_edges()
+    _, titles = edges.load_summaries()
+    dag = dependency.build_dag(edges_frame, titles=set(titles))
+    return dependency.break_cycles(dag)[0]
+
+
+def stage_ego(args: argparse.Namespace) -> None:
+    """Everything within N hops of one notion."""
+    if not args.node:
+        sys.exit("ego needs --node")
+    dag = _dag()
+    if args.node not in dag:
+        sys.exit(f"{args.node!r} is not in the DAG ({dag.number_of_nodes()} nodes)")
+    out = config.ARTIFACT_DIR / "queries" / "ego.png"
+    render_focus.render_ego(dag, args.node, out, radius=args.radius)
+    distances = nx.single_source_shortest_path_length(dag.to_undirected(), args.node, cutoff=args.radius)
+    by_hop: dict[int, list[str]] = {}
+    for node, distance in distances.items():
+        if node != args.node:
+            by_hop.setdefault(distance, []).append(node)
+    for distance in sorted(by_hop):
+        log.info("%d hop(s): %d nodes — %s", distance, len(by_hop[distance]),
+                 ", ".join(sorted(by_hop[distance])[:10]))
+    log.info("rendered %s", out)
+
+
+def stage_path(args: argparse.Namespace) -> None:
+    """The prerequisite chain between two notions."""
+    if not args.source or not args.target:
+        sys.exit("path needs --from and --to")
+    dag = _dag()
+    for title in (args.source, args.target):
+        if title not in dag:
+            sys.exit(f"{title!r} is not in the DAG ({dag.number_of_nodes()} nodes)")
+    chain, kind = dependency.path_between(dag, args.source, args.target)
+    if chain is None:
+        sys.exit(f"no path from {args.source!r} to {args.target!r} in the current edge set")
+    log.info("%s path (%d steps): %s", kind, len(chain), " -> ".join(chain))
+    if kind == "undirected":
+        log.warning("this is not a directed prerequisite chain; the direction is mixed")
+    out = config.ARTIFACT_DIR / "queries" / "path.png"
+    render_focus.render_chain(chain, out, kind=kind)
+    log.info("rendered %s", out)
+
+
+def stage_describe(args: argparse.Namespace) -> None:
+    """Text summary of one notion."""
+    if not args.node:
+        sys.exit("describe needs --node")
+    dag = _dag()
+    info = dependency.describe(dag, args.node)
+    if not info.get("present"):
+        sys.exit(f"{args.node!r} is not in the DAG ({dag.number_of_nodes()} nodes)")
+    log.info("%s: %d prerequisites, %d enabled (%d in / %d out)",
+             info["node"], info["prerequisites"], info["enables"],
+             info["in_degree"], info["out_degree"])
+    log.info("needs directly: %s", ", ".join(info["immediate_prerequisites"]) or "nothing")
+    log.info("enables directly: %s", ", ".join(info["immediate_enables"]) or "nothing")
+    if info["longest_chain_through"]:
+        log.info("longest chain through it: %s", " -> ".join(info["longest_chain_through"]))
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -362,6 +425,9 @@ STAGES = {
     "edges": (stage_edges, "extract dependency edges (phrase + Wikidata)"),
     "dependency": (stage_dependency, "build + render the prerequisite DAG"),
     "view": (stage_view, "render a graph from a declarative spec"),
+    "ego": (stage_ego, "nodes within N hops of one notion"),
+    "path": (stage_path, "prerequisite chain between two notions"),
+    "describe": (stage_describe, "text summary of one notion"),
     "serve": (stage_serve, "start the live view server"),
     "set": (stage_set, "push a spec patch to the running viewer"),
     "all": (stage_all, "wikidata -> fetch -> build"),
@@ -404,6 +470,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="view stage: patch the spec, e.g. --set node.size=\"degree ** 1.5\"")
     parser.add_argument("--out", default="", help="view stage: output path")
     parser.add_argument("--port", type=int, default=8765, help="serve/set stage: HTTP port")
+    parser.add_argument("--node", default="", help="ego/describe: the notion")
+    parser.add_argument("--from", dest="source", default="", help="path: starting notion")
+    parser.add_argument("--to", dest="target", default="", help="path: target notion")
     parser.add_argument("--focus", default="", help="dependency stage: render this notion's ego view")
     parser.add_argument("--radius", type=int, default=2, help="dependency stage: ego radius")
     parser.add_argument("--min-confidence", type=float, default=0.0,
@@ -449,6 +518,7 @@ GLOBAL_FLAGS = {
 GLOBAL_VALUED = {
     "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",
     "--labels", "--view", "--max-degree", "--legacy-csv",
+    "--node", "--from", "--to",
 }
 
 
