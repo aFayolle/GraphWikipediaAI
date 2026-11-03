@@ -186,9 +186,13 @@ def layered_positions(
     positions: dict[str, tuple[float, float]] = {}
     for level, nodes in columns.items():
         nodes.sort()
+        # Normalise each column to a fixed height. Without this, a column of 600
+        # nodes is 36 units tall while a column of 3 is 0.2, and the figure
+        # degenerates into an unreadable wedge.
+        count = max(1, len(nodes))
         for index, node in enumerate(nodes):
-            offset = index - (len(nodes) - 1) / 2
-            positions[node] = (level * x_spacing, -offset * y_spacing)
+            offset = (index / count) - 0.5
+            positions[node] = (level * x_spacing, -offset * max(1.0, y_spacing * 12))
     return positions
 
 
@@ -227,3 +231,38 @@ def ego_graph(graph: nx.DiGraph, node: str, radius: int = 2) -> nx.DiGraph:
         return nx.DiGraph()
     forward = nx.ego_graph(graph, node, radius=radius, undirected=True)
     return graph.subgraph(set(forward.nodes) | {node}).copy()
+
+
+def enrich_with_attributes(graph: nx.DiGraph) -> nx.DiGraph:
+    """Attach ``sitelinks`` and ``kind`` to DAG nodes for view expressions.
+
+    The DAG is built from edges only, so without this a spec like
+    ``size: degree ** 1.2`` has no popularity column to work with.
+    """
+    from . import scope
+
+    nodes_csv = config.NODES_CSV
+    if not nodes_csv.exists():
+        return graph
+
+    nodes = pd.read_csv(nodes_csv, dtype=str, keep_default_na=False)
+    title_by_qid = dict(zip(nodes["qid"], nodes["title"], strict=False))
+    sitelinks = {
+        title: float(value or 0)
+        for title, value in zip(nodes["title"], pd.to_numeric(nodes["sitelinks"], errors="coerce"), strict=False)
+    }
+
+    kind_by_title: dict[str, str] = {}
+    if scope.TYPES_CSV.exists() and scope.PARENTS_CSV.exists():
+        types = pd.read_csv(scope.TYPES_CSV, dtype=str)
+        parents = pd.read_csv(scope.PARENTS_CSV, dtype=str)
+        kinds = scope.item_kinds(types, scope.ancestor_closure(parents))
+        for qid, values in kinds.items():
+            title = title_by_qid.get(qid)
+            if title and title not in kind_by_title:
+                kind_by_title[title] = sorted(values)[0]
+
+    for node in graph:
+        graph.nodes[node]["sitelinks"] = sitelinks.get(node, 0.0)
+        graph.nodes[node]["kind"] = kind_by_title.get(node, "unknown")
+    return graph

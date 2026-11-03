@@ -38,7 +38,11 @@ from mathkg import (
     render,
     render_focus,
     scope,
+    view_render,
     wikidata,
+)
+from mathkg import (
+    view as view_module,
 )
 
 log = logging.getLogger("run")
@@ -219,6 +223,36 @@ def stage_dependency(args: argparse.Namespace) -> None:
         export.write_pyvis(biggest, out / "dependency.html")
 
 
+def _graph_for_spec(spec: dict) -> nx.Graph:
+    """The graph a spec draws: the prerequisite DAG or the link graph."""
+    if spec.get("source") == "link":
+        article_graph, _, _ = _colored_graph(argparse.Namespace(
+            max_degree=None, no_html=True, view="fields", labels=40,
+            largest_component=False,
+        ))
+        return article_graph
+    edges_frame = dependency.load_edges()
+    _, titles = edges.load_summaries()
+    dag = dependency.build_dag(edges_frame, titles=set(titles))
+    return dependency.enrich_with_attributes(dag)
+
+
+def stage_view(args: argparse.Namespace) -> None:
+    """Render a graph from a declarative spec (no Python editing required)."""
+    spec = view_module.load_spec(Path(args.spec) if args.spec else None)
+    if args.set:
+        view_module.apply_overrides(spec, args.set)
+
+    graph = _graph_for_spec(spec)
+    mentions_path = config.RAW_DIR / "mentions.csv"
+    mentions = pd.read_csv(mentions_path) if mentions_path.exists() else None
+
+    name = args.out or f"{spec.get('name', 'view')}"
+    out = Path(name) if name.endswith(".png") else config.ARTIFACT_DIR / "views" / f"{name}.png"
+    view_render.render_spec(graph, spec, out, mentions=mentions)
+    log.info("view rendered: %s", out)
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -287,6 +321,7 @@ STAGES = {
     "scope": (stage_scope, "classify items, fold duplicates, write the scoping report"),
     "edges": (stage_edges, "extract dependency edges (phrase + Wikidata)"),
     "dependency": (stage_dependency, "build + render the prerequisite DAG"),
+    "view": (stage_view, "render a graph from a declarative spec"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
@@ -322,6 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--labels", type=int, default=40, help="how many top-degree nodes to label"
     )
+    parser.add_argument("--spec", default="", help="view/dependency: spec file (yaml or json)")
+    parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                        help="view stage: patch the spec, e.g. --set node.size=\"degree ** 1.5\"")
+    parser.add_argument("--out", default="", help="view stage: output path")
     parser.add_argument("--focus", default="", help="dependency stage: render this notion's ego view")
     parser.add_argument("--radius", type=int, default=2, help="dependency stage: ego radius")
     parser.add_argument("--min-confidence", type=float, default=0.0,
