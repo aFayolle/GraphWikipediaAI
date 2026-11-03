@@ -241,12 +241,18 @@ def render_graph(
     figsize: tuple[float, float] = (15.0, 10.5),
     dpi: int = 110,
     seed: int = config.LAYOUT_SEED,
+    positions: dict | None = None,
 ) -> Path:
-    """Render a graph to PNG. Returns the path written."""
+    """Render a graph to PNG. Returns the path written.
+
+    ``positions`` lets a caller supply a layout -- the prerequisite DAG uses
+    layered positions, which a force layout would destroy.
+    """
     if only_largest_component:
         graph = largest_component(graph)
 
-    positions = layout_graph(graph, seed=seed)
+    if positions is None:
+        positions = layout_graph(graph, seed=seed)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

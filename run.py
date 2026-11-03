@@ -30,11 +30,13 @@ from mathkg import (
     color,
     config,
     curriculum,
+    dependency,
     edges,
     export,
     fetch,
     graph,
     render,
+    render_focus,
     scope,
     wikidata,
 )
@@ -156,6 +158,67 @@ def stage_edges(args: argparse.Namespace) -> None:
     edges.run(use_wikidata=not args.no_wikidata, use_proof_sections=not args.no_proof)
 
 
+def stage_dependency(args: argparse.Namespace) -> None:
+    """Build the prerequisite DAG, report its structure, and render it."""
+    edges_frame = dependency.load_edges()
+    _, titles = edges.load_summaries()
+
+    graph = dependency.build_dag(
+        edges_frame,
+        titles=set(titles),
+        min_confidence=args.min_confidence,
+        include_classification=args.include_classification,
+    )
+    stats = dependency.summary(graph)
+    log.info("dependency DAG: %s", stats)
+
+    cycles = dependency.cycle_report(graph)
+    for component in cycles[:3]:
+        log.info("  cycle (%d): %s", len(component), ", ".join(component[:8]))
+
+    dag, dropped = dependency.break_cycles(graph)
+    log.info("acyclic after dropping %d weak edge(s) = %s",
+             dropped, nx.is_directed_acyclic_graph(dag))
+
+    path = dependency.critical_path(dag)
+    if path:
+        log.info("critical path (%d): %s", len(path), " -> ".join(path))
+
+    out = config.ARTIFACT_DIR / "dependency"
+    out.mkdir(parents=True, exist_ok=True)
+
+    if args.focus:
+        focus = args.focus
+        if focus not in dag:
+            sys.exit(f"{focus!r} is not in the DAG ({dag.number_of_nodes()} nodes)")
+        pre = dependency.prerequisites_of(dag, focus)
+        enables = dependency.enables(dag, focus)
+        log.info("%s: %d prerequisites, %d enabled", focus, len(pre) - 1, len(enables) - 1)
+        ego = dependency.ego_graph(dag, focus, radius=args.radius)
+        log.info("ego graph: %d nodes", ego.number_of_nodes())
+        render_focus.render_prerequisite_view(
+            dag, focus, out / "focus.png", radius=args.radius
+        )
+        export.write_pyvis(ego, out / "focus.html")
+
+    biggest = render.largest_component(dag)
+    if biggest.number_of_nodes() > 2:
+        log.info("largest component: %d nodes", biggest.number_of_nodes())
+        render.render_graph(
+            biggest,
+            out / "dependency.png",
+            title="Prerequisite DAG — largest component",
+            subtitle=(
+                f"{biggest.number_of_nodes():,} nodes · {biggest.number_of_edges():,} edges · "
+                "columns = prerequisite depth"
+            ),
+            positions=dependency.layered_positions(biggest, x_spacing=1.0, y_spacing=0.06),
+            label_top=35,
+            figsize=(18, 12),
+        )
+        export.write_pyvis(biggest, out / "dependency.html")
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -223,6 +286,7 @@ STAGES = {
     "render": (stage_render, "render a static PNG of the graph (for review)"),
     "scope": (stage_scope, "classify items, fold duplicates, write the scoping report"),
     "edges": (stage_edges, "extract dependency edges (phrase + Wikidata)"),
+    "dependency": (stage_dependency, "build + render the prerequisite DAG"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
@@ -257,6 +321,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--labels", type=int, default=40, help="how many top-degree nodes to label"
+    )
+    parser.add_argument("--focus", default="", help="dependency stage: render this notion's ego view")
+    parser.add_argument("--radius", type=int, default=2, help="dependency stage: ego radius")
+    parser.add_argument("--min-confidence", type=float, default=0.0,
+                        help="dependency stage: drop edges below this confidence")
+    parser.add_argument(
+        "--include-classification",
+        action="store_true",
+        help="dependency stage: include Wikidata P279 subclass edges (taxonomy, not prerequisite)",
     )
     parser.add_argument(
         "--no-proof",
