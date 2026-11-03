@@ -1,0 +1,62 @@
+MathKG — un graphe enfin lisible, et la mesure de ce qui n'allait pas
+
+Tu avais raison sur les deux points : c'était illisible, et je l'avais affirmé
+"sans avoir mesuré le bazar". Voici la mesure, puis ce que j'ai construit.
+
+1. LA MESURE (ce que j'aurais dû faire dès le début)
+
+J'ai converti chaque disposition en pixels écran (1600x1000) avant de la juger,
+puis compté quatre choses : recouvrement des nœuds, distance au plus proche
+voisin, taux de croisement des arêtes, collisions d'étiquettes.
+
+Verdict pour le graphe complet (1 560 nœuds) : distance médiane au plus proche
+voisin = 1,13 px. Les nœuds sont plus proches que leur propre rayon. Aucun
+choix de couleur, de taille ou de style ne peut rattraper ça : le problème est
+la densité, pas la décoration.
+
+Le tableau complet (7 tailles de sous-graphe x 3 dispositions x 2 cadrages) est
+dans le HTML joint. Résultat honnête : aucun candidat n'atteint le seuil que
+j'avais fixé d'avance (3 px). Le meilleur est 194 nœuds, 327 arêtes :
+
+  recouvrement 0,043 %   plus proche voisin 2,06 px
+  croisements 2,46 %     collisions d'étiquettes 0,67 %
+
+2. CE QUI MARCHE, ET CE QUI NE MARCHE PAS
+
+Embeddings : TF-IDF sur titre + résumé d'intro, puis SVD tronquée à 50 dims
+(LSA). Hors ligne, aucun modèle à télécharger.
+
+Foyers : k-medoids (PAM simplifié) sur ces 50 dimensions, donc un foyer est un
+article réel et pas une moyenne. Pour ce sous-graphe : Morley's trisector
+theorem, Ingleton's inequality, Monstrous moonshine, Nielsen–Ninomiya theorem.
+
+Couleur : distance aux foyers, poids exp(-d²/sigma), mélange des 3 plus proches.
+Un nœud entre deux domaines prend une couleur intermédiaire au lieu d'être
+forcé dans une classe.
+
+Ce qui ne marche pas : les clusters obtenus sont LEXICAUX, pas mathématiques.
+Deux notions sans rapport qui partagent du vocabulaire de théorème se
+retrouvent proches. Et disposer le graphe selon l'ACP de ces embeddings est
+pire qu'une force dirigée (croisements 15-17 % contre 2,5 %) : un sac de mots
+s'effondre en boule floue.
+
+3. LA VRAIE LIMITE
+
+Sur un canevas fixe de 1600x1000, ce graphe reste dense quelle que soit la
+disposition. La sortie honnête n'est donc pas "un plus beau dessin" mais un
+canevas plus grand que l'écran : le HTML joint est panoramique (molette / zoom),
+donc la zone lisible n'est plus bornée par la taille de la fenêtre.
+
+4. CE QUE JE FERAIS ENSUITE
+
+- Embeddings de voisinage (node2vec/DeepWalk) au lieu du sac de mots : ça
+  capturerait la structure du graphe, pas le vocabulaire des résumés.
+- Ou des embeddings de phrases (un vrai modèle), si tu acceptes le
+  téléchargement.
+- Séparer les composantes connexes et les disposer côte à côte plutôt que de
+  les entasser.
+- Le filtre min_degree >= 5 est un choix de lisibilité, pas de science : il
+  jette 87 % du graphe. C'est un curseur à discuter, pas une décision.
+
+Fichiers : reports/readable/{mathkg_readable.html, graph.json, nodes.csv,
+centres.csv}. Régénérable par PYTHONPATH=. python tools/make_readable.py.

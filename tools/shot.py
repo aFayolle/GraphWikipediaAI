@@ -29,6 +29,7 @@ def main() -> int:
     out = Path(sys.argv[2] if len(sys.argv) > 2 else "data/artifacts/browser.png")
     settle = float(sys.argv[3]) if len(sys.argv) > 3 else 8.0
     freeze = len(sys.argv) > 4 and sys.argv[4].lower() in {"freeze", "1", "true"}
+    full = len(sys.argv) > 5 and sys.argv[5].lower() in {"full", "1", "true"}
 
     out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -44,7 +45,8 @@ def main() -> int:
         if freeze:
             page.evaluate("window.stopMotion && window.stopMotion()")
             page.wait_for_timeout(400)
-        page.screenshot(path=str(out), timeout=90_000, animations="disabled")
+        page.screenshot(path=str(out), timeout=90_000, animations="disabled",
+                        full_page=full)
         browser.close()
 
     print(f"{out} ({out.stat().st_size / 1e6:.1f} MB)")
