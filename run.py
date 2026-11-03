@@ -386,7 +386,10 @@ def stage_import_layout(args: argparse.Namespace) -> None:
             len(unknown), ", ".join(unknown[:3]),
         )
     installed = render.install_positions(graph, positions)
+    # Make the imported layout what you actually see, without a second command.
+    view_module.apply_overrides(spec, ["layout=installed"])
     log.info("layout installed from %s -> %s", source.name, installed.name)
+    log.info("view layout set to 'installed'; `run.py set --set layout=layered` to go back")
 
 
 def stage_gephi_layout(args: argparse.Namespace) -> None:

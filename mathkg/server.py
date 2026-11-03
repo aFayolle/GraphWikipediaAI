@@ -67,32 +67,35 @@ class ViewerState:
     # -- layout ------------------------------------------------------------- #
 
     def _compute_positions(self) -> dict[str, tuple[float, float]]:
+        """Positions for the requested layout. The spec value always wins.
+
+        `installed` is a *choice*, not an override: an earlier version let any
+        imported layout beat `layered`/`forceatlas2`, so changing the layout
+        looked like it did nothing while the log said "using installed layout".
+        """
         layout = self.spec.get("layout")
 
-        # Precedence: an explicit physics request beats everything, because it is
-        # asking for *no* coordinates so vis-network can animate and settle.
         if layout == "physics":
             log.info("viewer: physics mode (no server positions)")
             return {}
 
-        # An installed layout (Gephi Toolkit, an imported GEXF, a TSV) beats the
-        # computed ones. It used to be ignored here while the PNG renderers
-        # honoured it, so an imported Gephi layout changed nothing in the tab.
-        from .render import _installed_path, _read_positions_file
-
-        installed = _installed_path(self.graph)
-        if installed.exists():
-            raw = _read_positions_file(installed)
-            log.info("viewer: using installed layout (%s)", installed.name)
-            return self._scale(raw)
+        if layout in {"installed", "gephi"}:
+            raw = self._installed_positions()
+            if raw:
+                return self._scale(raw)
+            log.warning("viewer: layout=installed but no layout is installed; using forceatlas2")
+            layout = "forceatlas2"
 
         if layout == "forceatlas2":
             from .render import forceatlas2_positions
 
             positions = forceatlas2_positions(self.graph)
             return self._scale(positions, factor=260.0)
+
         if layout != "layered":
+            log.info("viewer: layout=%s has no server positions (physics on)", layout)
             return {}
+
         from .dependency import break_cycles, layered_positions
 
         try:
@@ -102,6 +105,15 @@ class ViewerState:
             log.warning("layered layout failed (%s); falling back to physics", exc)
             return {}
         return self._scale(positions)
+
+    def _installed_positions(self) -> dict[str, tuple[float, float]]:
+        from .render import _installed_path, _read_positions_file
+
+        path = _installed_path(self.graph)
+        if not path.exists():
+            return {}
+        log.info("viewer: using installed layout (%s)", path.name)
+        return _read_positions_file(path)
 
     @staticmethod
     def _scale(

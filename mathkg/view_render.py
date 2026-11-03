@@ -86,7 +86,22 @@ def render_spec(
     working = apply_filter(graph, spec, node_columns)
     node_columns = {node: row for node, row in node_columns.items() if node in working}
 
-    if spec.get("layout") == "layered":
+    if spec.get("layout") in {"installed", "gephi"}:
+        from .render import _installed_path, _read_positions_file
+
+        path = _installed_path(working)
+        positions = _read_positions_file(path) if path.exists() else None
+        if positions:
+            log.info("layout: installed (%s)", path.name)
+        else:
+            log.warning("layout=installed but nothing is installed; using forceatlas2")
+            positions = forceatlas2_positions(working)
+    elif spec.get("layout") == "physics":
+        # A PNG needs coordinates, so a physics view is rendered from the
+        # force-directed layout rather than left blank.
+        log.info("layout: physics requested for a static render; using forceatlas2")
+        positions = forceatlas2_positions(working)
+    elif spec.get("layout") == "layered":
         from .dependency import break_cycles, layered_positions
 
         acyclic, _ = break_cycles(nx.DiGraph(working))

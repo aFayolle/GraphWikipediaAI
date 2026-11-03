@@ -382,6 +382,9 @@ EDGE_COLUMNS = {
 LABEL_COLUMNS: set[str] = set()
 
 
+LAYOUTS = {"physics", "installed", "gephi", "layered", "forceatlas2", "spring"}
+
+
 def validate_spec(spec: dict[str, Any]) -> None:
     """Compile every expression in a spec, so a bad one fails immediately.
 
@@ -400,3 +403,10 @@ def validate_spec(spec: dict[str, Any]) -> None:
             value = (block or {}).get(key)
             if is_expression(value, columns):
                 compile_expression(str(value), columns)
+
+    layout = str(spec.get("layout", ""))
+    if layout not in LAYOUTS:
+        raise ExpressionError(
+            f"unknown layout {layout!r}; expected one of {sorted(LAYOUTS)}"
+            " (an unclosed quote in your shell command often ends up here)"
+        )
