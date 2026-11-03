@@ -40,7 +40,8 @@ function initNetwork(withPhysics) {
       : false,
     interaction: { hover: true, tooltipDelay: 120, hideEdgesOnDrag: true },
     edges: { color: { opacity: 0.25 }, width: 0.5, arrows: { to: { enabled: true, scaleFactor: 0.4 } } },
-    nodes: { shape: "dot", borderWidth: 0, font: { color: "#f0f0f0", size: 12 } }
+    nodes: { shape: "dot", borderWidth: 0,
+      font: { color: "#f0f0f0", size: 12, strokeWidth: 4, strokeColor: "#101018" } }
   });
 }
 
@@ -59,7 +60,8 @@ async function loadGraph() {
   nodes = new vis.DataSet(payload.nodes.map(n => ({
     id: n.id, label: n.label, title: n.title || n.id,
     x: n.x, y: n.y, physics: n.x === undefined,
-    size: n.size, color: n.color, font: { size: n.font_size }
+    size: n.size, color: n.color,
+    font: { size: n.font_size, color: "#f0f0f0", strokeWidth: 4, strokeColor: "#101018" }
   })));
   edges = new vis.DataSet(payload.edges.map(e => ({
     id: e.id, from: e.from, to: e.to, width: e.width,
@@ -67,6 +69,8 @@ async function loadGraph() {
   })));
 
   initNetwork(payload.physics);
+  // Without this the view stays at 1:1 coordinates and the graph is a speck.
+  setTimeout(() => { if (network) network.fit({ animation: false }); }, 1500);
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
   setStatus(`loaded in ${Date.now() - started} ms · structure v${payload.version}`);
 }
@@ -77,7 +81,7 @@ function applyStyle(payload) {
     id: n.id,
     size: n.size,
     color: n.color,
-    font: { size: n.font_size, color: "#f0f0f0" }
+    font: { size: n.font_size, color: "#f0f0f0", strokeWidth: 4, strokeColor: "#101018" }
   }));
   nodes.update(updates);
   if (payload.edges && payload.edges.length) {

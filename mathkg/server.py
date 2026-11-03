@@ -104,7 +104,10 @@ class ViewerState:
             from .render import forceatlas2_positions
 
             positions = forceatlas2_positions(self.graph)
-            return self._scale(positions, factor=260.0)
+            # Normalise onto the canvas. Scaling by a constant factor instead
+            # produced coordinates in the hundreds of thousands, so every node
+            # was sub-pixel and the tab looked empty.
+            return self._scale(positions)
 
         if layout != "layered":
             log.info("viewer: layout=%s has no server positions (physics on)", layout)
@@ -204,13 +207,20 @@ class ViewerState:
     def graph_payload(self) -> dict[str, Any]:
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
         font = self._font_size()
+        # Label only the top-N nodes. Labelling all 1,560 turned the core into an
+        # unreadable white blob; `label.count` existed for the PNG renderer and
+        # was ignored here.
+        limit = int((self.spec.get("label") or {}).get("count", 40))
+        ranked = sorted(self.graph.degree, key=lambda pair: (-pair[1], str(pair[0])))
+        labelled = {node for node, _ in ranked[:limit]}
         nodes = []
         for node, data in self.graph.nodes(data=True):
             x, y = self._positions.get(node, (None, None))
             nodes.append(
                 {
                     "id": node,
-                    "label": str(data.get("label", node))[:48],
+                    "label": (str(data.get("label", node))[:48]
+                              if node in labelled else ""),
                     "title": f"{node} — degree {self.graph.degree(node)}, sitelinks {int(data.get('sitelinks', 0))}",
                     "x": x,
                     "y": y,
