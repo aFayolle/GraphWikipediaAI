@@ -68,11 +68,29 @@ class ViewerState:
 
     def _compute_positions(self) -> dict[str, tuple[float, float]]:
         layout = self.spec.get("layout")
+
+        # Precedence: an explicit physics request beats everything, because it is
+        # asking for *no* coordinates so vis-network can animate and settle.
+        if layout == "physics":
+            log.info("viewer: physics mode (no server positions)")
+            return {}
+
+        # An installed layout (Gephi Toolkit, an imported GEXF, a TSV) beats the
+        # computed ones. It used to be ignored here while the PNG renderers
+        # honoured it, so an imported Gephi layout changed nothing in the tab.
+        from .render import _installed_path, _read_positions_file
+
+        installed = _installed_path(self.graph)
+        if installed.exists():
+            raw = _read_positions_file(installed)
+            log.info("viewer: using installed layout (%s)", installed.name)
+            return self._scale(raw)
+
         if layout == "forceatlas2":
             from .render import forceatlas2_positions
 
             positions = forceatlas2_positions(self.graph)
-            return {node: (float(x) * 260.0, float(y) * 260.0) for node, (x, y) in positions.items()}
+            return self._scale(positions, factor=260.0)
         if layout != "layered":
             return {}
         from .dependency import break_cycles, layered_positions
@@ -83,11 +101,19 @@ class ViewerState:
         except Exception as exc:  # pragma: no cover - defensive
             log.warning("layered layout failed (%s); falling back to physics", exc)
             return {}
-        # Scale to a pixel canvas vis-network can use directly.
-        xs = [p[0] for p in positions.values()] or [0]
-        ys = [p[1] for p in positions.values()] or [0]
+        return self._scale(positions)
+
+    @staticmethod
+    def _scale(
+        positions: dict[str, tuple[float, float]], factor: float | None = None
+    ) -> dict[str, tuple[float, float]]:
+        """Map arbitrary coordinates onto the pixel canvas vis-network expects."""
+        xs = [p[0] for p in positions.values()] or [0.0]
+        ys = [p[1] for p in positions.values()] or [0.0]
         span_x = (max(xs) - min(xs)) or 1.0
         span_y = (max(ys) - min(ys)) or 1.0
+        if factor is not None:
+            return {node: (x * factor, y * factor) for node, (x, y) in positions.items()}
         return {
             node: ((x - min(xs)) / span_x * 1600 - 800, (y - min(ys)) / span_y * 1000 - 500)
             for node, (x, y) in positions.items()
@@ -220,10 +246,20 @@ class ViewerState:
     def patch_spec(self, overrides: list[str]) -> dict[str, Any]:
         """Validate on a copy first, so a bad patch leaves the view untouched."""
         candidate = copy.deepcopy(self.spec)
+        previous_layout = self.spec.get("layout")
         view_module.apply_overrides(candidate, overrides)
         view_module.validate_spec(candidate)
+        layout_changed = candidate.get("layout") != previous_layout
         self.spec = candidate
         self.version += 1
+
+        if layout_changed:
+            # Positions have to be recomputed and the client has to re-seat its
+            # DataSets: a style delta cannot move nodes.
+            self._positions = self._compute_positions()
+            self.broadcast({"type": "graph"})
+            return {"type": "graph", "version": self.version, "detail": self.detail()}
+
         message = self.style_payload()
         self.broadcast(message)
         return message
