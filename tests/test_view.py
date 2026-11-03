@@ -142,3 +142,36 @@ def test_bare_column_name_is_an_expression():
 
 def test_unknown_bare_string_stays_literal():
     assert is_expression("not_a_column", {"confidence"}) is False
+
+
+# --- ForceAtlas2 ------------------------------------------------------------ #
+
+def test_forceatlas2_is_deterministic_and_cached(tmp_path, monkeypatch):
+    """Gephi's layout must be reproducible, and cheap on the second call."""
+    import networkx as nx
+
+    from mathkg import render
+
+    monkeypatch.setattr(render, "LAYOUT_CACHE", tmp_path)
+    graph = nx.cycle_graph(8)
+
+    first = render.forceatlas2_positions(graph, seed=7, max_iter=20)
+    second = render.forceatlas2_positions(graph, seed=7, max_iter=20)  # cache hit
+
+    assert set(first) == set(graph.nodes)
+    assert first == second
+    assert list(tmp_path.glob("*_fa2.json"))
+
+
+def test_forceatlas2_different_seeds_differ(tmp_path, monkeypatch):
+    import networkx as nx
+
+    from mathkg import render
+
+    monkeypatch.setattr(render, "LAYOUT_CACHE", tmp_path)
+    graph = nx.cycle_graph(6)
+
+    a = render.forceatlas2_positions(graph, seed=1, max_iter=15)
+    b = render.forceatlas2_positions(graph, seed=2, max_iter=15)
+
+    assert a != b

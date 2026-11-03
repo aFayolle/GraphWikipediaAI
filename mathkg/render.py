@@ -91,7 +91,9 @@ def layout_graph(
     if use_cache and cache_file.exists():
         raw = json.loads(cache_file.read_text(encoding="utf-8"))
         log.info("layout: cache hit (%s)", cache_file.name)
-        return {node: (float(x), float(y)) for node, (x, y) in raw.items()}
+        # Stored as [[node, [x, y]], ...]: JSON object keys are always strings,
+        # so an integer node id would silently come back as "0".
+        return {node: (float(x), float(y)) for node, (x, y) in raw}
 
     log.info(
         "layout: computing for %d nodes / %d edges (this takes ~1 min at full scale)",
@@ -101,7 +103,7 @@ def layout_graph(
     positions = nx.spring_layout(graph, seed=seed, iterations=iterations)
     if use_cache:
         cache_file.write_text(
-            json.dumps({node: [float(x), float(y)] for node, (x, y) in positions.items()}),
+            json.dumps([[node, [float(x), float(y)]] for node, (x, y) in positions.items()]),
             encoding="utf-8",
         )
     return {node: (float(x), float(y)) for node, (x, y) in positions.items()}
@@ -308,3 +310,44 @@ def render_graph(
     plt.close(figure)
     log.info("render: %s (%.1f MB)", out_path, out_path.stat().st_size / 1e6)
     return out_path
+
+
+# --------------------------------------------------------------------------- #
+# ForceAtlas2 (Gephi's signature layout)
+# --------------------------------------------------------------------------- #
+
+def forceatlas2_positions(
+    graph: nx.Graph,
+    seed: int = config.LAYOUT_SEED,
+    max_iter: int = 120,
+    use_cache: bool = True,
+) -> dict[str, tuple[float, float]]:
+    """Gephi's layout, via networkx, with the same on-disk caching as spring.
+
+    Gephi's real draw for this project is ForceAtlas2, and ``networkx>=3.4``
+    ships it, so the signature layout can be produced inside the pipeline --
+    including the PNGs I can actually look at -- without installing Gephi or
+    driving its GUI.
+    """
+    LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
+    key = _graph_fingerprint(graph, max_iter, seed) + "_fa2"
+    cache_file = LAYOUT_CACHE / f"{key}.json"
+
+    if use_cache and cache_file.exists():
+        raw = json.loads(cache_file.read_text(encoding="utf-8"))
+        log.info("layout: forceatlas2 cache hit (%s)", cache_file.name)
+        return {node: (float(x), float(y)) for node, (x, y) in raw}
+
+    log.info(
+        "layout: forceatlas2 on %d nodes / %d edges (%d iterations)",
+        graph.number_of_nodes(),
+        graph.number_of_edges(),
+        max_iter,
+    )
+    positions = nx.forceatlas2_layout(graph, max_iter=max_iter, seed=seed)
+    if use_cache:
+        cache_file.write_text(
+            json.dumps([[node, [float(x), float(y)]] for node, (x, y) in positions.items()]),
+            encoding="utf-8",
+        )
+    return {node: (float(x), float(y)) for node, (x, y) in positions.items()}

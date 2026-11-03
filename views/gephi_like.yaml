@@ -1,0 +1,18 @@
+# ForceAtlas2 — Gephi's signature layout, computed by networkx and cached.
+# Physics is off in the tab because the server supplies these positions, so the
+# tab and the PNG show the same thing.
+name: gephi_like
+source: dependency
+layout: forceatlas2
+title: "Prerequisite DAG — ForceAtlas2 (Gephi layout)"
+node:
+  size: "6 + 1.2 * degree"
+  color: "#76B7B2"
+label:
+  count: 45
+  size: 7.0
+edge:
+  width: "0.25"
+  opacity: 0.18
+edge_weight:
+  formula: confidence

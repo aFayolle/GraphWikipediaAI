@@ -67,7 +67,13 @@ class ViewerState:
     # -- layout ------------------------------------------------------------- #
 
     def _compute_positions(self) -> dict[str, tuple[float, float]]:
-        if self.spec.get("layout") != "layered":
+        layout = self.spec.get("layout")
+        if layout == "forceatlas2":
+            from .render import forceatlas2_positions
+
+            positions = forceatlas2_positions(self.graph)
+            return {node: (float(x) * 260.0, float(y) * 260.0) for node, (x, y) in positions.items()}
+        if layout != "layered":
             return {}
         from .dependency import break_cycles, layered_positions
 

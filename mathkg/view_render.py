@@ -24,6 +24,7 @@ from .render import (  # noqa: E402
     BACKGROUND,
     FOREGROUND,
     _draw_labels,
+    forceatlas2_positions,
     largest_component,
     layout_graph,
 )
@@ -94,6 +95,8 @@ def render_spec(
         missing = [node for node in working if node not in positions]
         for index, node in enumerate(missing):
             positions[node] = (0.0, -index * 0.06)
+    elif spec.get("layout") == "forceatlas2":
+        positions = forceatlas2_positions(working)
     else:
         positions = layout_graph(working)
 
