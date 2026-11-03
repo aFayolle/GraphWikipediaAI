@@ -410,3 +410,54 @@ def validate_spec(spec: dict[str, Any]) -> None:
             f"unknown layout {layout!r}; expected one of {sorted(LAYOUTS)}"
             " (an unclosed quote in your shell command often ends up here)"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Colour by rule
+# --------------------------------------------------------------------------- #
+
+DEFAULT_PALETTE = ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51",
+                   "#6a4c93", "#1982c4", "#8ac926"]
+
+
+def node_colors(
+    graph, spec: dict, columns: dict[str, dict[str, Any]]
+) -> dict[str, str]:
+    """Assign a colour per node: either one literal, or a binned rule.
+
+    ``node.color_by`` takes a column and a palette; values are split into equal
+    quantile bins so the colouring is robust to the heavy tails these graphs have
+    (degree 1 dominates, one node has degree 35). Explicit ``bins`` may be given
+    instead of quantiles.
+    """
+    node_spec = spec.get("node") or {}
+    literal = node_spec.get("color", "#4E79A7")
+
+    rule = node_spec.get("color_by")
+    if not rule:
+        return {node: literal for node in graph.nodes}
+
+    column = rule.get("column", "degree")
+    palette = rule.get("palette") or DEFAULT_PALETTE
+    values = {node: float(columns.get(node, {}).get(column, 0) or 0) for node in graph.nodes}
+
+    bins = rule.get("bins")
+    if bins:
+        edges_list = sorted({float(b) for b in bins})
+    else:
+        ordered = sorted(values.values())
+        count = max(1, len(palette) - 1)
+        edges_list = [
+            ordered[min(len(ordered) - 1, int(len(ordered) * (i + 1) / count))]
+            for i in range(count - 1)
+        ]
+        edges_list = sorted(set(edges_list))
+
+    def colour_for(value: float) -> str:
+        index = 0
+        for edge_value in edges_list:
+            if value > edge_value:
+                index += 1
+        return palette[min(index, len(palette) - 1)]
+
+    return {node: colour_for(value) for node, value in values.items()}

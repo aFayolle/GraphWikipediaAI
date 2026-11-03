@@ -147,7 +147,7 @@ class ViewerState:
 
     def style_payload(self, sent: float | None = None) -> dict[str, Any]:
         """Node/edge styling only -- cheap enough to send on every change."""
-        colour = self.spec.get("node", {}).get("color", "#4E79A7")
+        colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
         font = self._font_size()
         edges = [
             {"id": f"{source}\u0000{target}", "width": self._edge_width(source, target)}
@@ -166,7 +166,8 @@ class ViewerState:
             "spec": self.spec,
             "detail": self.detail(),
             "nodes": [
-                {"id": node, "size": self._size_for(node), "color": colour, "font_size": font}
+                {"id": node, "size": self._size_for(node), "color": colours.get(node, "#4E79A7"),
+                 "font_size": font}
                 for node in self.graph.nodes
             ],
             "edges": changed_edges,
@@ -187,7 +188,7 @@ class ViewerState:
         return max(0.2, min(6.0, math.log1p(max(0.0, weight)) * 2))
 
     def graph_payload(self) -> dict[str, Any]:
-        colour = self.spec.get("node", {}).get("color", "#4E79A7")
+        colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
         font = self._font_size()
         nodes = []
         for node, data in self.graph.nodes(data=True):
@@ -200,7 +201,7 @@ class ViewerState:
                     "x": x,
                     "y": y,
                     "size": self._size_for(node),
-                    "color": colour,
+                    "color": colours.get(node, "#4E79A7"),
                     "font_size": font,
                 }
             )
@@ -224,13 +225,26 @@ class ViewerState:
         }
 
     def detail(self) -> str:
+        """Live parameter readout. Values only -- no rationale, deliberately."""
         node = self.spec.get("node", {})
         label = self.spec.get("label", {})
         weight = self.spec.get("edge_weight", {})
-        return (
-            f"size: {node.get('size')} · labels: {label.get('count')} @ {label.get('size')}px"
-            f" · edge weight: {weight.get('formula')}"
+        edge = self.spec.get("edge", {})
+        filters = self.spec.get("filter", {})
+        colour_rule = node.get("color_by")
+        colour = (
+            f"by {colour_rule.get('column')}" if colour_rule else str(node.get("color"))
         )
+        parts = [
+            f"layout={self.spec.get('layout')}",
+            f"size={node.get('size')}",
+            f"colour={colour}",
+            f"edge_w={weight.get('formula')} >= {weight.get('minimum')}",
+            f"edge_opacity={edge.get('opacity')}",
+            f"labels={label.get('count')}@{label.get('size')}px",
+            f"min_degree={filters.get('min_degree')}",
+        ]
+        return "  ·  ".join(parts)
 
     # -- broadcasting -------------------------------------------------------- #
 

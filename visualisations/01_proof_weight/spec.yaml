@@ -1,0 +1,17 @@
+name: "01 — proof-weighted edges"
+source: dependency
+layout: installed
+title: "01 — edges weighted by mentions inside a proof"
+subtitle: "width ∝ occurrences × in_proof   ·   only edges cited in a proof survive"
+node:
+  size: "5 + 1.5 * degree"
+  color: "#59A14F"
+label:
+  count: 30
+  size: 6.5
+edge:
+  width: "0.3"
+  opacity: 0.45
+edge_weight:
+  formula: "occurrences * in_proof"
+  minimum: 0.5

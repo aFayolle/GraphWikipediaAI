@@ -169,20 +169,15 @@ def render_spec(
         ax.collections[-1].set_alpha(sum(alphas) / len(alphas))
 
     size_expr = view_module.compile_expression(str(node_spec.get("size", 8)), NODE_COLUMNS)
-    color_value = node_spec.get("color", "#4E79A7")
-    if view_module.is_expression(color_value):
-        raise view_module.ExpressionError(
-            "node.color must be a literal hex string for now; use kinds for grouping"
-        )
     opacity = float(node_spec.get("opacity", 0.9) or 0.9)
+    colours_by_node = view_module.node_colors(working, spec, node_columns)
 
     nodes = [node for node in working if node in positions]
     xs = [positions[node][0] for node in nodes]
     ys = [positions[node][1] for node in nodes]
     sizes = [max(1.0, float(size_expr(node_columns[node]))) for node in nodes]
-    ax.scatter(
-        xs, ys, s=sizes, c=color_value, linewidths=0, alpha=opacity, zorder=2
-    )
+    colours = [colours_by_node.get(node, "#4E79A7") for node in nodes]
+    ax.scatter(xs, ys, s=sizes, c=colours, linewidths=0, alpha=opacity, zorder=2)
 
     _draw_labels(
         ax,

@@ -236,9 +236,10 @@ def _graph_for_spec(spec: dict) -> nx.Graph:
             largest_component=False,
         ))
         return article_graph
-    edges_frame = dependency.load_edges()
-    _, titles = edges.load_summaries()
-    dag = dependency.build_dag(edges_frame, titles=set(titles))
+    # Must be the same DAG the caches and installed layouts are keyed on, so
+    # break_cycles belongs here too. Without it, `run.py view` computed a
+    # different fingerprint and silently ignored an installed layout.
+    dag = dependency.break_cycles(_dag())[0]
     return dependency.enrich_with_attributes(dag)
 
 

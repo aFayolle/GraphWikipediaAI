@@ -1,0 +1,21 @@
+name: "03 — hub spine"
+source: dependency
+layout: installed
+title: "03 — the spine: only nodes with degree ≥ 4"
+subtitle: "min_degree = 4   ·   colour = degree quintiles   ·   width ∝ proof mentions"
+node:
+  size: "8 + 3 * degree"
+  color_by:
+    column: degree
+    palette: ["#f4a261", "#e9c46a", "#2a9d8f", "#1982c4", "#6a4c93"]
+label:
+  count: 55
+  size: 8.0
+edge:
+  width: "0.4"
+  opacity: 0.40
+edge_weight:
+  formula: "occurrences * in_proof"
+  minimum: 0.0
+filter:
+  min_degree: 4

@@ -71,13 +71,23 @@ public class GephiToolkitLayout {
         ForceAtlas2 layout = builder.buildLayout();
         layout.setGraphModel(graphModel);
         layout.resetPropertiesValues();
+        // Gephi's *GUI defaults*, not my earlier guesses. The first version used
+        // adjustSizes(true) ("Prevent Overlap"), scalingRatio 50 and
+        // jitterTolerance 0.1, which inflates the graph into a uniformly spaced
+        // shell -- the ring the user never saw in Gephi.
         layout.setLinLogMode(linLog);
-        layout.setAdjustSizes(true);       // Gephi's "prevent overlap"
-        layout.setStrongGravityMode(true);
+        layout.setAdjustSizes(false);
+        layout.setStrongGravityMode(false);
         layout.setGravity(1.0);
-        layout.setScalingRatio(50.0);
-        layout.setJitterTolerance(0.1);
+        layout.setScalingRatio(10.0);
+        layout.setJitterTolerance(1.0);
+        layout.setEdgeWeightInfluence(1.0);
         layout.setBarnesHutOptimize(true);
+
+        // NOTE: Gephi's GUI exposes "Dissuade Hubs", but the Toolkit does not:
+        // ForceAtlas2LayoutData only carries old_dx/old_dy/mass and there is no
+        // outboundAttractionDistribution setter. That option cannot be reproduced
+        // headlessly with gephi-toolkit 0.10.1.
 
         long started = System.currentTimeMillis();
         layout.initAlgo();

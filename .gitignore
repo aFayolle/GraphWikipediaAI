@@ -25,3 +25,7 @@ First_short_Graph_Export.json
 
 # Personal notes: kept on disk, deliberately NOT in the repository.
 Historique de pensée.txt
+
+# Visualisation screenshots are regenerable output, but the experiment
+# write-ups and specs are documentation: keep the notes, ignore the images.
+visualisations/*/screenshot.png
