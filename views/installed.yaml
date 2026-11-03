@@ -1,0 +1,18 @@
+# The layout as arranged elsewhere (Gephi Toolkit, or a GEXF/TSV you exported),
+# with node size proportional to degree. `layout: installed` means exactly that:
+# no recomputation, whatever was imported is what you see.
+name: installed
+source: dependency
+layout: installed
+title: "Prerequisite DAG — imported layout, node size ∝ degree"
+node:
+  size: "6 + 2.5 * degree"
+  color: "#4E79A7"
+label:
+  count: 45
+  size: 7.0
+edge:
+  width: "0.25"
+  opacity: 0.18
+edge_weight:
+  formula: confidence

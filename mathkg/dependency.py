@@ -159,7 +159,11 @@ def break_cycles(graph: nx.DiGraph) -> tuple[nx.DiGraph, int]:
             ]
             if not inner:
                 continue
-            weakest = min(inner, key=lambda item: item[2])
+            # Ties on confidence must break deterministically, or the surviving
+            # edge depends on set iteration order -- which PYTHONHASHSEED
+            # randomises per process, giving a different DAG (and a different
+            # layout fingerprint) on every run.
+            weakest = min(inner, key=lambda item: (item[2], str(item[0]), str(item[1])))
             working.remove_edge(weakest[0], weakest[1])
             dropped += 1
     if dropped:
