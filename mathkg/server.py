@@ -52,15 +52,29 @@ class ViewerState:
     """The graph, the spec, and the set of connected clients."""
 
     def __init__(self, graph: nx.Graph, spec: dict, mentions: pd.DataFrame | None = None):
-        self.graph = graph
+        self.source_graph = graph      # everything
+        self.graph = graph             # what the spec currently shows
         self.spec = spec
         self.mentions = mentions
         self.version = 0
         self.structure_version = 0
         self._subscribers: list[queue.Queue] = []
         self._lock = threading.Lock()
-        self._node_columns = view_module.node_rows(graph)
-        self._edge_columns = view_module.edge_rows(graph, mentions)
+        self._last_edge_style: str | None = None
+        self._refresh_graph()
+
+    def _refresh_graph(self) -> None:
+        """Rebuild the visible graph from source_graph + the spec's filter block.
+
+        The filter used to be honoured by the PNG renderer only, so
+        `set --set filter.min_degree=4` changed the spec text and nothing else.
+        """
+        from .view_render import apply_filter
+
+        rows = view_module.node_rows(self.source_graph)
+        self.graph = apply_filter(self.source_graph, self.spec, rows)
+        self._node_columns = view_module.node_rows(self.graph)
+        self._edge_columns = view_module.edge_rows(self.graph, self.mentions)
         self._positions = self._compute_positions()
         self._last_edge_style: str | None = None
 
@@ -273,16 +287,18 @@ class ViewerState:
         """Validate on a copy first, so a bad patch leaves the view untouched."""
         candidate = copy.deepcopy(self.spec)
         previous_layout = self.spec.get("layout")
+        previous_filter = self.spec.get("filter")
         view_module.apply_overrides(candidate, overrides)
         view_module.validate_spec(candidate)
         layout_changed = candidate.get("layout") != previous_layout
+        filter_changed = candidate.get("filter") != previous_filter
         self.spec = candidate
         self.version += 1
 
-        if layout_changed:
+        if layout_changed or filter_changed:
             # Positions have to be recomputed and the client has to re-seat its
             # DataSets: a style delta cannot move nodes.
-            self._positions = self._compute_positions()
+            self._refresh_graph()
             self.broadcast({"type": "graph"})
             return {"type": "graph", "version": self.version, "detail": self.detail()}
 
@@ -291,10 +307,8 @@ class ViewerState:
         return message
 
     def replace_graph(self, graph: nx.Graph) -> None:
-        self.graph = graph
-        self._node_columns = view_module.node_rows(graph)
-        self._edge_columns = view_module.edge_rows(graph, self.mentions)
-        self._positions = self._compute_positions()
+        self.source_graph = graph
+        self._refresh_graph()
         self.structure_version += 1
         self.broadcast({"type": "graph"})
 
