@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>MathKG live view</title>
+<script src="/lib/vis-network.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #101018; color: #f0f0f0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  #net { width: 100%; height: 100%; }
+  #hud { position: absolute; top: 10px; left: 12px; background: rgba(16,16,24,.82);
+    padding: 10px 14px; border-radius: 8px; font-size: 12px; line-height: 1.5;
+    max-width: 42ch; pointer-events: none; }
+  #hud b { color: #fff; }
+  .dim { color: #9aa4b2; }
+  #status { position: absolute; bottom: 10px; left: 12px; font-size: 11px; color: #7f8899; }
+</style>
+</head>
+<body>
+<div id="net"></div>
+<div id="hud">
+  <b id="spec-name">…</b><br />
+  <span id="counts" class="dim"></span><br />
+  <span id="spec-detail" class="dim"></span>
+</div>
+<div id="status">connecting…</div>
+
+<script>
+const netEl = document.getElementById("net");
+let nodes = new vis.DataSet([]);
+let edges = new vis.DataSet([]);
+let network = null;
+const started = Date.now();
+
+function initNetwork(withPhysics) {
+  if (network) network.destroy();
+  network = new vis.Network(netEl, { nodes, edges }, {
+    physics: withPhysics
+      ? { solver: "forceAtlas2Based", stabilization: { iterations: 200 } }
+      : false,
+    interaction: { hover: true, tooltipDelay: 120, hideEdgesOnDrag: true },
+    edges: { color: { opacity: 0.25 }, width: 0.5, arrows: { to: { enabled: true, scaleFactor: 0.4 } } },
+    nodes: { shape: "dot", borderWidth: 0, font: { color: "#f0f0f0", size: 12 } }
+  });
+}
+
+function setStatus(text) { document.getElementById("status").textContent = text; }
+function setHud(spec, nodeCount, edgeCount, extra) {
+  document.getElementById("spec-name").textContent = spec.name || "view";
+  document.getElementById("counts").textContent = `${nodeCount} nodes · ${edgeCount} edges`;
+  document.getElementById("spec-detail").textContent = extra || "";
+}
+
+/* Full load: called once, and again only when the graph *structure* changes. */
+async function loadGraph() {
+  const response = await fetch("/graph");
+  const payload = await response.json();
+
+  nodes = new vis.DataSet(payload.nodes.map(n => ({
+    id: n.id, label: n.label, title: n.title || n.id,
+    x: n.x, y: n.y, physics: n.x === undefined,
+    size: n.size, color: n.color, font: { size: n.font_size }
+  })));
+  edges = new vis.DataSet(payload.edges.map(e => ({
+    id: e.id, from: e.from, to: e.to, width: e.width,
+    title: e.evidence || ""
+  })));
+
+  initNetwork(payload.physics);
+  setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
+  setStatus(`loaded in ${Date.now() - started} ms · structure v${payload.version}`);
+}
+
+/* Style-only update: no reload, no re-layout. This is the fast path. */
+function applyStyle(payload) {
+  const updates = payload.nodes.map(n => ({
+    id: n.id,
+    size: n.size,
+    color: n.color,
+    font: { size: n.font_size, color: "#f0f0f0" }
+  }));
+  nodes.update(updates);
+  if (payload.edges && payload.edges.length) {
+    edges.update(payload.edges.map(e => ({ id: e.id, width: e.width })));
+  }
+  setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
+  setStatus(`style applied in ${Date.now() - payload.sent} ms · spec v${payload.version}`);
+}
+
+function connect() {
+  const source = new EventSource("/events");
+  source.addEventListener("style", ev => applyStyle(JSON.parse(ev.data)));
+  source.addEventListener("graph", () => loadGraph());
+  source.onopen = () => setStatus("live — waiting for changes");
+  source.onerror = () => setStatus("disconnected, retrying…");
+}
+
+loadGraph().then(connect);
+</script>
+</body>
+</html>

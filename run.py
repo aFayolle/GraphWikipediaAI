@@ -21,6 +21,8 @@ import argparse
 import json
 import logging
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import networkx as nx
@@ -40,6 +42,9 @@ from mathkg import (
     scope,
     view_render,
     wikidata,
+)
+from mathkg import (
+    server as server_module,
 )
 from mathkg import (
     view as view_module,
@@ -242,6 +247,7 @@ def stage_view(args: argparse.Namespace) -> None:
     spec = view_module.load_spec(Path(args.spec) if args.spec else None)
     if args.set:
         view_module.apply_overrides(spec, args.set)
+    view_module.validate_spec(spec)
 
     graph = _graph_for_spec(spec)
     mentions_path = config.RAW_DIR / "mentions.csv"
@@ -251,6 +257,40 @@ def stage_view(args: argparse.Namespace) -> None:
     out = Path(name) if name.endswith(".png") else config.ARTIFACT_DIR / "views" / f"{name}.png"
     view_render.render_spec(graph, spec, out, mentions=mentions)
     log.info("view rendered: %s", out)
+
+
+def stage_serve(args: argparse.Namespace) -> None:
+    """Start the live viewer: the tab updates in place as the spec changes."""
+    spec = view_module.load_spec(Path(args.spec) if args.spec else None)
+    if args.set:
+        view_module.apply_overrides(spec, args.set)
+    view_module.validate_spec(spec)
+    graph = _graph_for_spec(spec)
+
+    mentions_path = config.RAW_DIR / "mentions.csv"
+    mentions = pd.read_csv(mentions_path) if mentions_path.exists() else None
+
+    log.info("graph for the live view: %d nodes, %d edges", graph.number_of_nodes(), graph.number_of_edges())
+    server_module.serve(graph, spec, mentions, port=args.port)
+
+
+def stage_set(args: argparse.Namespace) -> None:
+    """Push a spec patch to a running viewer (no reload)."""
+    if not args.set:
+        sys.exit("nothing to set: pass --set key=value (repeatable)")
+    payload = json.dumps({"set": args.set}).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{args.port}/spec",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            reply = json.loads(response.read())
+    except urllib.error.URLError as exc:
+        sys.exit(f"no viewer on port {args.port} ({exc}). Start one with `run.py serve`.")
+    log.info("pushed: %s", reply)
 
 
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
@@ -322,6 +362,8 @@ STAGES = {
     "edges": (stage_edges, "extract dependency edges (phrase + Wikidata)"),
     "dependency": (stage_dependency, "build + render the prerequisite DAG"),
     "view": (stage_view, "render a graph from a declarative spec"),
+    "serve": (stage_serve, "start the live view server"),
+    "set": (stage_set, "push a spec patch to the running viewer"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
@@ -361,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                         help="view stage: patch the spec, e.g. --set node.size=\"degree ** 1.5\"")
     parser.add_argument("--out", default="", help="view stage: output path")
+    parser.add_argument("--port", type=int, default=8765, help="serve/set stage: HTTP port")
     parser.add_argument("--focus", default="", help="dependency stage: render this notion's ego view")
     parser.add_argument("--radius", type=int, default=2, help="dependency stage: ego radius")
     parser.add_argument("--min-confidence", type=float, default=0.0,
@@ -392,10 +435,53 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# --------------------------------------------------------------------------- #
+# argv normalisation
+# --------------------------------------------------------------------------- #
+
+#: Options that live on the main parser; argparse requires them *before* the
+#: subcommand. Nobody types `run.py --set node.size=degree set`, so the order is
+#: normalised instead of documented and hoped for.
+GLOBAL_FLAGS = {
+    "--verbose", "--no-html", "--largest-component", "--no-wikidata", "--no-proof",
+    "--include-classification",
+}
+GLOBAL_VALUED = {
+    "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",
+    "--labels", "--view", "--max-degree", "--legacy-csv",
+}
+
+
+def normalise_argv(argv: list[str]) -> list[str]:
+    """Move global options in front of the subcommand, preserving their order."""
+    head: list[str] = []
+    tail: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        name = token.split("=", 1)[0]
+        if name in GLOBAL_FLAGS:
+            head.append(token)
+            index += 1
+            continue
+        if name in GLOBAL_VALUED:
+            head.append(token)
+            if "=" not in token and index + 1 < len(argv):
+                head.append(argv[index + 1])
+                index += 2
+                continue
+            index += 1
+            continue
+        tail.append(token)
+        index += 1
+    return head + tail
+
+
 def main(argv: list[str] | None = None) -> int:
     from mathkg import setup_logging
 
-    args = build_parser().parse_args(argv)
+    raw = sys.argv[1:] if argv is None else argv
+    args = build_parser().parse_args(normalise_argv(list(raw)))
     setup_logging(args.verbose)
     config.ensure_dirs()
 

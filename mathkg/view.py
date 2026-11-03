@@ -24,6 +24,7 @@ import ast
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -223,16 +224,32 @@ def _compare(operator: ast.cmpop, left: Any, right: Any) -> bool:
     raise ExpressionError("unsupported comparison")
 
 
-def is_expression(value: Any) -> bool:
-    """A spec value is an expression when it is a string using an operator/name."""
+def is_expression(value: Any, allowed: set[str] | None = None) -> bool:
+    """Is this spec value an expression, or a literal (a colour, a number)?
+
+    A bare column name counts as an expression: ``edge_weight.formula:
+    confidence`` must evaluate to the row's confidence, not to the string
+    "confidence". Ignoring that produced a ``could not convert string to float``
+    in the live server.
+    """
     if not isinstance(value, str):
         return False
-    return any(token in value for token in "+-*/()") or value.strip() in {"degree"}
+    text = value.strip()
+    if any(token in value for token in "+-*/()"):
+        return True
+    if text.startswith("#") or text in CONSTANTS:
+        return False
+    if allowed is not None:
+        return text in allowed
+    # No column list supplied: any bare identifier is treated as an expression,
+    # which keeps `is_expression("degree")` true for callers that only have the
+    # value in hand.
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]{0,40}", text))
 
 
 def evaluate(value: Any, row: dict[str, Any], allowed: set[str]) -> Any:
     """Evaluate a spec value if it is an expression, else return it unchanged."""
-    if not is_expression(value):
+    if not is_expression(value, allowed):
         return value
     return compile_expression(value, allowed)(row)
 
@@ -355,3 +372,31 @@ def edge_rows(graph: nx.Graph, mentions: pd.DataFrame | None) -> dict[tuple[str,
             "in_proof": 0.0,
         }
     return stats
+
+
+#: Columns an expression may reference, by context.
+NODE_COLUMNS = {"degree", "sitelinks", "kind", "is_anchor"}
+EDGE_COLUMNS = {
+    "confidence", "popularity", "occurrences", "relative_position", "in_lead", "in_proof",
+}
+LABEL_COLUMNS: set[str] = set()
+
+
+def validate_spec(spec: dict[str, Any]) -> None:
+    """Compile every expression in a spec, so a bad one fails immediately.
+
+    Without this, a typo in ``node.size`` was stored silently and only surfaced
+    as a logged warning on the next render -- the user would change the spec and
+    see nothing happen, with no error. Raises :class:`ExpressionError`.
+    """
+    checks = [
+        (spec.get("node", {}), ("size", "color", "opacity"), NODE_COLUMNS),
+        (spec.get("label", {}), ("size", "count", "min_separation"), LABEL_COLUMNS),
+        (spec.get("edge", {}), ("width", "opacity"), EDGE_COLUMNS),
+        (spec.get("edge_weight", {}), ("formula", "minimum"), EDGE_COLUMNS),
+    ]
+    for block, keys, columns in checks:
+        for key in keys:
+            value = (block or {}).get(key)
+            if is_expression(value, columns):
+                compile_expression(str(value), columns)

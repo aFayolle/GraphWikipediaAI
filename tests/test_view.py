@@ -16,7 +16,7 @@ from mathkg.view import (
     load_spec,
 )
 
-NAMES = {"degree", "sitelinks", "kind", "occurrences"}
+NAMES = {"degree", "sitelinks", "kind", "occurrences", "confidence"}
 
 
 def eval_expr(source, **row):
@@ -127,3 +127,18 @@ def test_spec_files_merge_onto_defaults(tmp_path):
 )
 def test_is_expression(value, expected):
     assert is_expression(value) is expected
+
+
+def test_bare_column_name_is_an_expression():
+    """`formula: confidence` must read the column, not produce the string.
+
+    This is a regression test: the live server crashed with 'could not convert
+    string to float: confidence' because a bare column name was not recognised
+    as an expression.
+    """
+    assert is_expression("confidence", {"confidence", "occurrences"}) is True
+    assert eval_expr("confidence", confidence=0.75) == 0.75
+
+
+def test_unknown_bare_string_stays_literal():
+    assert is_expression("not_a_column", {"confidence"}) is False
