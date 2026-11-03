@@ -413,3 +413,17 @@ def install_positions(
         cache_file.name,
     )
     return cache_file
+
+
+def positions_from_tsv(path: Path) -> dict[str, tuple[float, float]]:
+    """Read ``id<TAB>x<TAB>y`` as written by tools/GephiToolkitLayout.java."""
+    positions: dict[str, tuple[float, float]] = {}
+    for line in Path(path).read_text(encoding="utf-8").splitlines()[1:]:
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            try:
+                positions[parts[0]] = (float(parts[1]), float(parts[2]))
+            except ValueError:
+                continue
+    log.info("tsv: read %d positions from %s", len(positions), path)
+    return positions

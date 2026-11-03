@@ -389,6 +389,54 @@ def stage_import_layout(args: argparse.Namespace) -> None:
     log.info("layout installed from %s -> %s", source.name, installed.name)
 
 
+def stage_gephi_layout(args: argparse.Namespace) -> None:
+    """Run Gephi's own ForceAtlas2 headlessly, then adopt its coordinates.
+
+    This is the parity the user asked for: Gephi's Toolkit is Gephi's engine
+    without the window, so the layout is produced by Gephi itself rather than by
+    a reimplementation -- and it is far faster (300 iterations in ~0.9 s).
+    """
+    import subprocess
+
+    jar = config.DATA_DIR / "tools" / "gephi-toolkit-all.jar"
+    source_java = config.PROJECT_ROOT / "tools" / "GephiToolkitLayout.java"
+    if not jar.exists():
+        sys.exit(
+            f"missing {jar}. Fetch it once with:\n"
+            "  curl -sL -o data/tools/gephi-toolkit-all.jar "
+            "https://repo1.maven.org/maven2/org/gephi/gephi-toolkit/0.10.1/"
+            "gephi-toolkit-0.10.1-all.jar"
+        )
+
+    spec = view_module.load_spec(Path(args.spec) if args.spec else None)
+    graph = _graph_for_spec(spec)
+
+    gexf = config.ARTIFACT_DIR / "gephi" / "graph_with_positions.gexf"
+    if not gexf.exists():
+        export.write_gexf(graph, gexf, positions=render.forceatlas2_positions(graph))
+
+    tsv = config.ARTIFACT_DIR / "gephi" / "gephi_layout.tsv"
+    command = [
+        "java", "-cp", str(jar), str(source_java),
+        str(gexf), str(tsv), str(args.iterations), "true" if args.linlog else "false",
+    ]
+    log.info("running Gephi Toolkit: %d iterations (linlog=%s)", args.iterations, args.linlog)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+    for line in (result.stdout or "").splitlines():
+        if line.startswith("Gephi") or line.startswith("wrote"):
+            log.info("%s", line)
+    if result.returncode != 0:
+        sys.exit(f"Gephi Toolkit failed:\n{result.stderr[-2000:]}")
+
+    positions = render.positions_from_tsv(tsv)
+    if not positions:
+        sys.exit(f"Gephi wrote no positions to {tsv}")
+    render.install_positions(graph, positions)
+    out = config.ARTIFACT_DIR / "views" / "gephi_toolkit.png"
+    view_render.render_spec(graph, {**spec, "layout": "forceatlas2"}, out, mentions=None)
+    log.info("rendered %s", out)
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -463,6 +511,7 @@ STAGES = {
     "describe": (stage_describe, "text summary of one notion"),
     "gephi": (stage_gephi, "export a GEXF carrying our layout, for Gephi"),
     "import-layout": (stage_import_layout, "adopt coordinates from a GEXF"),
+    "gephi-layout": (stage_gephi_layout, "run Gephi's own ForceAtlas2 headlessly"),
     "serve": (stage_serve, "start the live view server"),
     "set": (stage_set, "push a spec patch to the running viewer"),
     "all": (stage_all, "wikidata -> fetch -> build"),
@@ -506,6 +555,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default="", help="view stage: output path")
     parser.add_argument("--port", type=int, default=8765, help="serve/set stage: HTTP port")
     parser.add_argument("--gexf", default="", help="import-layout: GEXF file to read positions from")
+    parser.add_argument("--iterations", type=int, default=300, help="gephi-layout: ForceAtlas2 iterations")
+    parser.add_argument("--linlog", action="store_true", help="gephi-layout: ForceAtlas2 LinLog mode")
     parser.add_argument("--node", default="", help="ego/describe: the notion")
     parser.add_argument("--from", dest="source", default="", help="path: starting notion")
     parser.add_argument("--to", dest="target", default="", help="path: target notion")
@@ -549,12 +600,12 @@ def build_parser() -> argparse.ArgumentParser:
 #: normalised instead of documented and hoped for.
 GLOBAL_FLAGS = {
     "--verbose", "--no-html", "--largest-component", "--no-wikidata", "--no-proof",
-    "--include-classification",
+    "--include-classification", "--linlog",
 }
 GLOBAL_VALUED = {
     "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",
     "--labels", "--view", "--max-degree", "--legacy-csv",
-    "--node", "--from", "--to", "--gexf",
+    "--node", "--from", "--to", "--gexf", "--iterations",
 }
 
 
