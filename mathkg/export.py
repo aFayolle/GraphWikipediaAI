@@ -34,7 +34,11 @@ def _rgb_from_hex(value: str) -> dict[str, int]:
     }
 
 
-def _export_copy(graph: nx.Graph, include_viz: bool = True) -> nx.Graph:
+def _export_copy(
+    graph: nx.Graph,
+    include_viz: bool = True,
+    positions: dict | None = None,
+) -> nx.Graph:
     """Graph with attributes coerced to things GEXF/GraphML/vis.js can store.
 
     ``distance_vector`` is a list of ``int|None``, which neither GEXF nor the
@@ -45,7 +49,7 @@ def _export_copy(graph: nx.Graph, include_viz: bool = True) -> nx.Graph:
     GEXF writer refuses ``NoneType`` attributes.
     """
     copy = graph.copy()
-    for _, data in copy.nodes(data=True):
+    for node, data in copy.nodes(data=True):
         vector = data.get("distance_vector")
         if isinstance(vector, list):
             data["distance_vector"] = ",".join(
@@ -56,10 +60,17 @@ def _export_copy(graph: nx.Graph, include_viz: bool = True) -> nx.Graph:
                 data[key] = ""
         colour = data.get("color")
         if include_viz and isinstance(colour, str) and colour.startswith("#"):
-            data["viz"] = {
+            viz: dict = {
                 "color": {**_rgb_from_hex(colour), "a": 1.0},
                 "size": float(data.get("size", 10.0)),
             }
+            if positions and node in positions:
+                x, y = positions[node]
+                viz["position"] = {"x": float(x), "y": float(y), "z": 0.0}
+            data["viz"] = viz
+        elif include_viz and positions and node in positions:
+            x, y = positions[node]
+            data["viz"] = {"position": {"x": float(x), "y": float(y), "z": 0.0}}
     return copy
 
 
@@ -95,9 +106,18 @@ def write_json(graph: nx.Graph, path: Path = config.ARTIFACT_DIR / "graph.json")
     return path
 
 
-def write_gexf(graph: nx.Graph, path: Path = config.ARTIFACT_DIR / "graph.gexf") -> Path:
+def write_gexf(
+    graph: nx.Graph,
+    path: Path = config.ARTIFACT_DIR / "graph.gexf",
+    positions: dict | None = None,
+) -> Path:
+    """GEXF export. With ``positions`` the file carries ``viz:position``, so
+    Gephi opens on *our* layout and a round trip (drag in Gephi, export, read the
+    coordinates back) becomes possible."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    nx.write_gexf(_export_copy(graph), path, encoding="utf-8", prettyprint=True)
+    nx.write_gexf(
+        _export_copy(graph, positions=positions), path, encoding="utf-8", prettyprint=True
+    )
     log.info("gexf  : %d nodes, %d edges -> %s", graph.number_of_nodes(), graph.number_of_edges(), path)
     return path
 

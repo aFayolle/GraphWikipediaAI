@@ -356,6 +356,39 @@ def stage_describe(args: argparse.Namespace) -> None:
         log.info("longest chain through it: %s", " -> ".join(info["longest_chain_through"]))
 
 
+def stage_gephi(args: argparse.Namespace) -> None:
+    """Write a GEXF that carries our layout, ready to open in Gephi."""
+    spec = view_module.load_spec(Path(args.spec) if args.spec else None)
+    graph = _graph_for_spec(spec)
+    positions = render.forceatlas2_positions(graph)
+    out = config.ARTIFACT_DIR / "gephi" / "graph_with_positions.gexf"
+    export.write_gexf(graph, out, positions=positions)
+    log.info("open this in Gephi: %s (%d nodes with positions)", out, len(positions))
+
+
+def stage_import_layout(args: argparse.Namespace) -> None:
+    """Adopt coordinates from a GEXF — e.g. one you arranged by hand in Gephi."""
+    if not args.gexf:
+        sys.exit("import-layout needs --gexf path/to/file.gexf")
+    source = Path(args.gexf)
+    if not source.exists():
+        sys.exit(f"no such file: {source}")
+
+    spec = view_module.load_spec(Path(args.spec) if args.spec else None)
+    graph = _graph_for_spec(spec)
+    positions = render.positions_from_gexf(source)
+    if not positions:
+        sys.exit(f"{source} contains no viz:position elements")
+    unknown = [node for node in positions if node not in graph]
+    if unknown:
+        log.warning(
+            "%d positions refer to nodes not in the graph (first: %s)",
+            len(unknown), ", ".join(unknown[:3]),
+        )
+    installed = render.install_positions(graph, positions)
+    log.info("layout installed from %s -> %s", source.name, installed.name)
+
+
 def stage_curriculum(args: argparse.Namespace) -> None:  # noqa: ARG001 (uniform signature)
     curriculum.run(config.ARTIFACT_DIR)
 
@@ -428,6 +461,8 @@ STAGES = {
     "ego": (stage_ego, "nodes within N hops of one notion"),
     "path": (stage_path, "prerequisite chain between two notions"),
     "describe": (stage_describe, "text summary of one notion"),
+    "gephi": (stage_gephi, "export a GEXF carrying our layout, for Gephi"),
+    "import-layout": (stage_import_layout, "adopt coordinates from a GEXF"),
     "serve": (stage_serve, "start the live view server"),
     "set": (stage_set, "push a spec patch to the running viewer"),
     "all": (stage_all, "wikidata -> fetch -> build"),
@@ -470,6 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="view stage: patch the spec, e.g. --set node.size=\"degree ** 1.5\"")
     parser.add_argument("--out", default="", help="view stage: output path")
     parser.add_argument("--port", type=int, default=8765, help="serve/set stage: HTTP port")
+    parser.add_argument("--gexf", default="", help="import-layout: GEXF file to read positions from")
     parser.add_argument("--node", default="", help="ego/describe: the notion")
     parser.add_argument("--from", dest="source", default="", help="path: starting notion")
     parser.add_argument("--to", dest="target", default="", help="path: target notion")
@@ -518,7 +554,7 @@ GLOBAL_FLAGS = {
 GLOBAL_VALUED = {
     "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",
     "--labels", "--view", "--max-degree", "--legacy-csv",
-    "--node", "--from", "--to",
+    "--node", "--from", "--to", "--gexf",
 }
 
 

@@ -175,3 +175,73 @@ def test_forceatlas2_different_seeds_differ(tmp_path, monkeypatch):
     b = render.forceatlas2_positions(graph, seed=2, max_iter=15)
 
     assert a != b
+
+
+# --- Gephi round trip -------------------------------------------------------- #
+
+def test_gexf_positions_survive_a_round_trip(tmp_path):
+    """Write viz:position, read it back: Gephi's layout is data, not pixels.
+
+    This is the loop that the GUI cannot give us: coordinates arranged elsewhere
+    (by hand in Gephi, by another tool) can be imported and become the layout the
+    PNG and the browser tab use.
+    """
+    import networkx as nx
+
+    from mathkg import export, render
+
+    graph = nx.path_graph(4)
+    for node in graph:
+        graph.nodes[node].update(color="#4E79A7", size=10.0)
+    positions = {node: (float(node), float(node) * 2) for node in graph}
+
+    path = tmp_path / "g.gexf"
+    export.write_gexf(graph, path, positions=positions)
+    assert "viz:position" in path.read_text(encoding="utf-8")
+
+    read_back = render.positions_from_gexf(path)
+    # node ids are strings in GEXF, so compare on the string form
+    for node, (x, y) in positions.items():
+        assert read_back[str(node)] == (x, y)
+
+
+def test_gexf_without_positions_reads_empty(tmp_path):
+    import networkx as nx
+
+    from mathkg import export, render
+
+    graph = nx.path_graph(3)
+    path = tmp_path / "g.gexf"
+    export.write_gexf(graph, path)
+    assert render.positions_from_gexf(path) == {}
+
+
+def test_install_positions_feeds_the_layout_cache(tmp_path, monkeypatch):
+    import networkx as nx
+
+    from mathkg import render
+
+    monkeypatch.setattr(render, "LAYOUT_CACHE", tmp_path)
+    graph = nx.path_graph(4)
+    # GEXF gives us string ids even though the graph holds ints.
+    positions = {str(node): (float(node), 0.0) for node in graph}
+
+    render.install_positions(graph, positions)
+    loaded = render.layout_graph(graph)
+
+    # Reconciled back onto the graph's own node ids.
+    assert loaded == {node: (float(node), 0.0) for node in graph}
+
+
+def test_install_positions_ignores_unknown_nodes(tmp_path, monkeypatch):
+    import networkx as nx
+
+    from mathkg import render
+
+    monkeypatch.setattr(render, "LAYOUT_CACHE", tmp_path)
+    graph = nx.path_graph(3)
+
+    render.install_positions(graph, {"0": (0.0, 0.0), "ghost": (9.0, 9.0)})
+    loaded = render.layout_graph(graph)
+
+    assert set(loaded) == {0}

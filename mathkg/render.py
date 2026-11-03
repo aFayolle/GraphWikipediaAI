@@ -351,3 +351,65 @@ def forceatlas2_positions(
             encoding="utf-8",
         )
     return {node: (float(x), float(y)) for node, (x, y) in positions.items()}
+
+
+# --------------------------------------------------------------------------- #
+# Gephi round trip
+# --------------------------------------------------------------------------- #
+
+def positions_from_gexf(path: Path) -> dict[str, tuple[float, float]]:
+    """Read ``viz:position`` back out of a GEXF, whoever produced it.
+
+    This is the half of the Gephi loop that was missing: Gephi's layout is
+    *data*, not pixels, so once you have arranged the graph by hand you export a
+    GEXF and the coordinates can be read here. No screen capture involved.
+    """
+    import xml.etree.ElementTree as ET
+
+    namespace = {"viz": "http://www.gexf.net/1.2draft/viz",
+                 "g": "http://www.gexf.net/1.2draft"}
+    tree = ET.parse(path)
+    positions: dict[str, tuple[float, float]] = {}
+    for node in tree.getroot().iter("{http://www.gexf.net/1.2draft}node"):
+        node_id = node.get("id")
+        point = node.find("viz:position", namespace)
+        if node_id and point is not None:
+            positions[node_id] = (float(point.get("x", 0.0)), float(point.get("y", 0.0)))
+    log.info("gexf: read %d positions from %s", len(positions), path)
+    return positions
+
+
+def install_positions(
+    graph: nx.Graph,
+    positions: dict[str, tuple[float, float]],
+    iterations: int = LAYOUT_ITERATIONS,
+    seed: int = config.LAYOUT_SEED,
+) -> Path:
+    """Store positions as *the* layout for this graph.
+
+    Written into the same cache slot the renderers and the live server read, so
+    a layout arranged by hand in Gephi immediately becomes what the PNG and the
+    browser tab show.
+    """
+    LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
+    # GEXF node ids are always strings, while graph nodes may be ints or tuples.
+    # Reconcile through the string form rather than silently dropping the match.
+    by_str = {str(node): node for node in graph.nodes}
+    relevant: dict = {}
+    for raw_node, point in positions.items():
+        node = raw_node if raw_node in graph else by_str.get(str(raw_node))
+        if node is not None:
+            relevant[node] = point
+    key = _graph_fingerprint(graph, iterations, seed)
+    cache_file = LAYOUT_CACHE / f"{key}.json"
+    cache_file.write_text(
+        json.dumps([[node, [float(x), float(y)]] for node, (x, y) in relevant.items()]),
+        encoding="utf-8",
+    )
+    log.info(
+        "layout: installed %d/%d positions from an external source -> %s",
+        len(relevant),
+        graph.number_of_nodes(),
+        cache_file.name,
+    )
+    return cache_file
