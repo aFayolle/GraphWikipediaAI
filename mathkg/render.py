@@ -80,7 +80,11 @@ def _installed_path(graph: nx.Graph, seed: int = config.LAYOUT_SEED) -> Path:
     slot -- so "installed 1560 positions" was true and the picture never changed.
     """
     LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
-    return LAYOUT_CACHE / f"{_graph_fingerprint(graph, 0, seed)}_installed.json"
+    # ONE slot, not one per fingerprint. The fingerprint includes the node and
+    # edge set, so tweaking a filter (min_degree, trim) threw the imported layout
+    # away and silently fell back to ForceAtlas2 -- the graph jumped on every
+    # filter change. Node ids are stable across filters, so the layout is too.
+    return LAYOUT_CACHE / "current_installed.json"
 
 
 def _read_positions_file(path: Path) -> dict[str, tuple[float, float]]:
@@ -103,8 +107,13 @@ def layout_graph(
     LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
     installed = _installed_path(graph, seed)
     if use_cache and installed.exists():
-        log.info("layout: using installed positions (%s)", installed.name)
-        return _read_positions_file(installed)
+        positions = _read_positions_file(installed)
+        # Intersect with the current graph: the slot holds a superset when a
+        # filter has narrowed the view.
+        present = {n: xy for n, xy in positions.items() if n in graph}
+        if present:
+            log.info("layout: using installed positions (%s, %d nodes)", installed.name, len(present))
+            return present
 
     key = _graph_fingerprint(graph, iterations, seed)
     cache_file = LAYOUT_CACHE / f"{key}.json"
@@ -353,8 +362,13 @@ def forceatlas2_positions(
     LAYOUT_CACHE.mkdir(parents=True, exist_ok=True)
     installed = _installed_path(graph, seed)
     if use_cache and installed.exists():
-        log.info("layout: using installed positions (%s)", installed.name)
-        return _read_positions_file(installed)
+        positions = _read_positions_file(installed)
+        # Intersect with the current graph: the slot holds a superset when a
+        # filter has narrowed the view.
+        present = {n: xy for n, xy in positions.items() if n in graph}
+        if present:
+            log.info("layout: using installed positions (%s, %d nodes)", installed.name, len(present))
+            return present
 
     key = _graph_fingerprint(graph, max_iter, seed) + "_fa2"
     cache_file = LAYOUT_CACHE / f"{key}.json"

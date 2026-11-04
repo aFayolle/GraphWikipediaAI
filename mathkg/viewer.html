@@ -259,7 +259,7 @@ async function loadGraph() {
     size: n.size,
     color: n.color,
     degree: n.degree,
-    font: { size: n.font_size, color: LABEL, strokeWidth: 1.2, strokeColor: BG }
+    font: { size: n.font_size, color: n.font_color || LABEL, strokeWidth: 1.2, strokeColor: BG }
   })));
   edges = new vis.DataSet(payload.edges.map(e => ({
     id: e.id, from: e.from, to: e.to, width: e.width, title: e.evidence || ""
@@ -298,7 +298,7 @@ function applyStyle(payload) {
     size: n.size,
     color: n.color,
     label: n.label === undefined ? undefined : n.label,
-    font: { size: n.font_size, color: LABEL, strokeWidth: 1.2, strokeColor: BG }
+    font: { size: n.font_size, color: n.font_color || LABEL, strokeWidth: 1.2, strokeColor: BG }
   })));
   if (payload.edges && payload.edges.length) {
     edges.update(payload.edges.map(e => ({ id: e.id, width: e.width })));

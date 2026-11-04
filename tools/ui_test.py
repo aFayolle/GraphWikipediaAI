@@ -135,20 +135,35 @@ def main() -> int:
               f"scale {scale_before:.2f} -> {scale_after:.2f}")
 
         # --- 5. a live spec patch changes node sizes ---------------------- #
+        # Unmistakable value: a random size could coincide with the spec already
+        # in place, which produced a false "0/40 changed" failure.
         sizes_before = page.evaluate(
             "() => Object.fromEntries(window.__state().nodes.get().slice(0, 40).map(n => [n.id, n.size]))"
         )
         page.evaluate(
             """async () => fetch('/spec', {method: 'POST',
                  headers: {'Content-Type': 'application/json'},
-                 body: JSON.stringify({set: ['node.size=20 + 6 * degree']})})"""
+                 body: JSON.stringify({set: ['node.size=200 + 0 * degree']})})"""
         )
-        page.wait_for_timeout(900)
-        sizes_after = page.evaluate(
-            "() => Object.fromEntries(window.__state().nodes.get().slice(0, 40).map(n => [n.id, n.size]))"
+        sizes_after, events = {}, 0
+        for _ in range(15):
+            page.wait_for_timeout(400)
+            sizes_after = page.evaluate(
+                "() => Object.fromEntries(window.__state().nodes.get().slice(0, 40).map(n => [n.id, n.size]))"
+            )
+            events = page.evaluate("() => window.__styleEvents")
+            if sizes_after and all(abs(v - 200) < 0.5 for v in sizes_after.values()):
+                break
+        patched = sum(1 for v in sizes_after.values() if abs(v - 200) < 0.5)
+        check("live patch resizes nodes", patched > 10,
+              f"{patched}/{len(sizes_after)} nodes now 200 px, {events} style event(s)")
+        # put the real expression back
+        page.evaluate(
+            """async () => fetch('/spec', {method: 'POST',
+                 headers: {'Content-Type': 'application/json'},
+                 body: JSON.stringify({set: ['node.size=9 + 11 * sqrt(degree)']})})"""
         )
-        changed = sum(1 for k in sizes_before if abs(sizes_after.get(k, 0) - sizes_before[k]) > 0.5)
-        check("live patch resizes nodes", changed > 10, f"{changed}/40 nodes changed size")
+        page.wait_for_timeout(600)
 
         # --- 6. animation playback moves nodes ---------------------------- #
         snapshot_a = page.evaluate(POSITIONS)

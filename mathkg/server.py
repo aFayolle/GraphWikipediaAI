@@ -73,10 +73,44 @@ class ViewerState:
 
         rows = view_module.node_rows(self.source_graph)
         self.graph = apply_filter(self.source_graph, self.spec, rows)
+        self._trim_stragglers()
         self._node_columns = view_module.node_rows(self.graph)
         self._edge_columns = view_module.edge_rows(self.graph, self.mentions)
         self._positions = self._compute_positions()
         self._last_edge_style: str | None = None
+
+    def _trim_stragglers(self) -> None:
+        """Drop far, low-degree nodes.
+
+        They carry no structure, but they sit so far out that fitting the view to
+        them shrinks every other node to a dot. Only weakly-connected nodes far
+        from the median position are removed, and never more than a fifth of the
+        graph, so this cannot quietly eat the content.
+        """
+        import numpy as np
+
+        pct = (self.spec.get("filter") or {}).get("trim_radius_pct")
+        if not pct:
+            return
+        try:
+            raw = self._installed_positions()
+        except Exception:
+            return
+        nodes = [node for node in self.graph.nodes if node in raw]
+        if len(nodes) < 50:
+            return
+        points = np.array([raw[node] for node in nodes], dtype=float)
+        centre = np.median(points, axis=0)
+        distance = np.linalg.norm(points - centre, axis=1)
+        cutoff = float(np.percentile(distance, float(pct)))
+        drop = [
+            node for node, dist in zip(nodes, distance)
+            if dist > cutoff and self.graph.degree(node) <= 3
+        ]
+        if not drop or len(drop) > 0.2 * len(nodes):
+            return
+        log.info("trim_radius_pct=%s: dropping %d stragglers", pct, len(drop))
+        self.graph.remove_nodes_from(drop)
 
     # -- layout ------------------------------------------------------------- #
 
@@ -177,6 +211,16 @@ class ViewerState:
         # degree-40 hub rendered at ~6 px instead of ~78 px.
         return max(2.0, float(value))
 
+    def _font_colour(self, node: str) -> str:
+        """Dim label for leaves, near-white for hubs: a second visual channel."""
+        degree = self.graph.degree(node) if node in self.graph else 0
+        weight = min(1.0, (degree ** 0.5) / 5.5)
+        low, high = (0x7E, 0x94, 0xB2), (0xFF, 0xFF, 0xFF)
+        red, green, blue = (
+            int(low[i] + (high[i] - low[i]) * weight) for i in range(3)
+        )
+        return f"#{red:02x}{green:02x}{blue:02x}"
+
     def _font_for(self, node: str) -> float:
         """Label size tied to the node's own size, so hubs read at a glance.
 
@@ -216,6 +260,7 @@ class ViewerState:
             "nodes": [
                 {"id": node, "size": self._size_for(node), "color": colours.get(node, "#4E79A7"),
                  "font_size": self._font_for(node),
+                 "font_color": self._font_colour(node),
                  "label": str(self.graph.nodes[node].get("label", node))[:48]
                           if node in labelled else ""}
                 for node in self.graph.nodes
@@ -255,6 +300,7 @@ class ViewerState:
                     "color": colours.get(node, "#4E79A7"),
                     "degree": int(self.graph.degree(node)),
                     "font_size": self._font_for(node),
+                 "font_color": self._font_colour(node),
                 }
             )
         edges = [
