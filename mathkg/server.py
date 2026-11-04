@@ -137,16 +137,31 @@ class ViewerState:
         positions: dict[str, tuple[float, float]], factor: float | None = None
     ) -> dict[str, tuple[float, float]]:
         """Map arbitrary coordinates onto the pixel canvas vis-network expects."""
-        xs = [p[0] for p in positions.values()] or [0.0]
-        ys = [p[1] for p in positions.values()] or [0.0]
-        span_x = (max(xs) - min(xs)) or 1.0
-        span_y = (max(ys) - min(ys)) or 1.0
+        import numpy as np
+
         if factor is not None:
             return {node: (x * factor, y * factor) for node, (x, y) in positions.items()}
-        return {
-            node: ((x - min(xs)) / span_x * 1600 - 800, (y - min(ys)) / span_y * 1000 - 500)
-            for node, (x, y) in positions.items()
-        }
+        if not positions:
+            return {}
+
+        values = np.array([p for p in positions.values()], dtype=float)
+        # Robust, not min/max: a single distant outlier used to define the whole
+        # span, squeezing every other node until it was sub-pixel.
+        lo_x, hi_x = np.percentile(values[:, 0], [1, 99])
+        lo_y, hi_y = np.percentile(values[:, 1], [1, 99])
+        centre_x, centre_y = (lo_x + hi_x) / 2, (lo_y + hi_y) / 2
+        span_x = max(hi_x - lo_x, 1e-9)
+        span_y = max(hi_y - lo_y, 1e-9)
+        scale = min(1600.0 / span_x, 1000.0 / span_y) * 0.92
+
+        out = {}
+        for node, (x, y) in positions.items():
+            # Outliers are pulled back to the border instead of dragging the view out.
+            out[node] = (
+                float(np.clip((x - centre_x) * scale, -770.0, 770.0)),
+                float(np.clip((y - centre_y) * scale, -470.0, 470.0)),
+            )
+        return out
 
     # -- derived attributes -------------------------------------------------- #
 
@@ -157,7 +172,23 @@ class ViewerState:
         except view_module.ExpressionError as exc:
             log.warning("bad node.size expression: %s", exc)
             value = 8
-        return max(1.0, math.sqrt(float(value)) * 1.1)
+        # No sqrt here: the expression already yields a radius. Applying a second
+        # sqrt turned "9 + 11*sqrt(degree)" into sqrt(9 + 11*sqrt(degree)), so a
+        # degree-40 hub rendered at ~6 px instead of ~78 px.
+        return max(2.0, float(value))
+
+    def _font_for(self, node: str) -> float:
+        """Label size tied to the node's own size, so hubs read at a glance.
+
+        A flat 9-12 px was drawn but unreadable: at the fitted zoom a 12 px glyph
+        with a thick dark halo collapses into an invisible smudge.
+        """
+        base = float((self.spec.get("label") or {}).get("size", 9))
+        try:
+            size = float(self._size_for(node))
+        except Exception:
+            size = 10.0
+        return float(min(max(base, size * 0.60), 46.0))
 
     def _font_size(self) -> float:
         return float(self.spec.get("label", {}).get("size", 7.0)) * 1.3
@@ -165,7 +196,7 @@ class ViewerState:
     def style_payload(self, sent: float | None = None) -> dict[str, Any]:
         """Node/edge styling only -- cheap enough to send on every change."""
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
-        font = self._font_size()
+        labelled = self._labelled()
         edges = [
             {"id": f"{source}\u0000{target}", "width": self._edge_width(source, target)}
             for source, target in self.graph.edges
@@ -184,7 +215,9 @@ class ViewerState:
             "detail": self.detail(),
             "nodes": [
                 {"id": node, "size": self._size_for(node), "color": colours.get(node, "#4E79A7"),
-                 "font_size": font}
+                 "font_size": self._font_for(node),
+                 "label": str(self.graph.nodes[node].get("label", node))[:48]
+                          if node in labelled else ""}
                 for node in self.graph.nodes
             ],
             "edges": changed_edges,
@@ -206,13 +239,7 @@ class ViewerState:
 
     def graph_payload(self) -> dict[str, Any]:
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
-        font = self._font_size()
-        # Label only the top-N nodes. Labelling all 1,560 turned the core into an
-        # unreadable white blob; `label.count` existed for the PNG renderer and
-        # was ignored here.
-        limit = int((self.spec.get("label") or {}).get("count", 40))
-        ranked = sorted(self.graph.degree, key=lambda pair: (-pair[1], str(pair[0])))
-        labelled = {node for node, _ in ranked[:limit]}
+        labelled = self._labelled()
         nodes = []
         for node, data in self.graph.nodes(data=True):
             x, y = self._positions.get(node, (None, None))
@@ -227,7 +254,7 @@ class ViewerState:
                     "size": self._size_for(node),
                     "color": colours.get(node, "#4E79A7"),
                     "degree": int(self.graph.degree(node)),
-                    "font_size": font,
+                    "font_size": self._font_for(node),
                 }
             )
         edges = [
@@ -248,6 +275,12 @@ class ViewerState:
             "nodes": nodes,
             "edges": edges,
         }
+
+    def _labelled(self) -> set[str]:
+        """Which nodes carry a visible label: the top `label.count` by degree."""
+        limit = int((self.spec.get("label") or {}).get("count", 40))
+        ranked = sorted(self.graph.degree, key=lambda pair: (-pair[1], str(pair[0])))
+        return {node for node, _ in ranked[:limit]}
 
     def detail(self) -> str:
         """Live parameter readout. Values only -- no rationale, deliberately."""

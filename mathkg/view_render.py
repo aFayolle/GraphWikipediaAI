@@ -61,6 +61,25 @@ def apply_filter(
             [node for node, degree in working.degree() if degree >= min_degree]
         ).copy()
 
+    # Outliers set the camera, not the reading: a handful of nodes far from the
+    # centroid force the whole view to zoom out until labels are sub-pixel.
+    max_pct = filters.get("trim_distance_pct")
+    if max_pct:
+        import numpy as _np
+
+        rows_now = view_module.node_rows(working)
+        xs = _np.array([rows_now[n]["degree"] * 0.0 for n in working])  # placeholder
+        positions = _np.array([(working.nodes[n].get("x", 0.0), working.nodes[n].get("y", 0.0))
+                               for n in working])
+        if positions.size:
+            centre = _np.median(positions, axis=0)
+            distance = _np.linalg.norm(positions - centre, axis=1)
+            cutoff = _np.percentile(distance, float(max_pct))
+            keep = [n for n, d in zip(working.nodes, distance) if d <= cutoff]
+            if len(keep) >= 10:
+                log.info("trim_distance_pct: %d -> %d nodes", working.number_of_nodes(), len(keep))
+                working = working.subgraph(keep).copy()
+
     if filters.get("component") == "largest":
         working = largest_component(working)
 

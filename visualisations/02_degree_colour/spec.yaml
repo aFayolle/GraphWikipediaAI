@@ -1,16 +1,16 @@
 name: "02 — degree colouring"
 source: dependency
 layout: installed
-title: "02 — colour by degree quintile, size ∝ log(sitelinks)"
-subtitle: "colour = degree quantiles (dark → orange)   ·   size = 4 + 30·log(1+sitelinks)"
+title: "02 — colour and size ∝ degree"
+subtitle: "colour = degree quantiles   ·   size = 5 + 9·√degree   ·   label size ∝ √degree"
 node:
-  size: "4 + 30 * log(1 + sitelinks)"
+  size: "9 + 11 * sqrt(degree)"
   color_by:
     column: degree
     palette: ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51"]
 label:
-  count: 30
-  size: 6.5
+  count: 9999
+  size: 9
 edge:
   width: "0.25"
   opacity: 0.12
