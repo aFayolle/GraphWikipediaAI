@@ -77,8 +77,23 @@ def main() -> int:
 
         # --- 3. DRAGGING: does the node stay where it is put? ------------- #
         before = page.evaluate(POSITIONS)
-        target = sorted(before)[0]
-        dom = page.evaluate(DOM_OF, target)
+        # Pick a node that is actually on screen and big enough to hit: taking the
+        # alphabetically first id grabbed an off-canvas node, so the synthetic
+        # mouse press landed on empty canvas ("moved 0 px").
+        target, dom = page.evaluate("""() => {
+          const { nodes, network } = window.__state();
+          const ranked = nodes.get().slice().sort((a, b) => (b.degree || 0) - (a.degree || 0));
+          for (const n of ranked) {
+            const p = network.getPositions([n.id])[n.id];
+            if (!p) continue;
+            const d = network.canvasToDOM({ x: p.x, y: p.y });
+            const underHud = d.x < 430 && d.y < 190;
+            if (d.x > 70 && d.x < 1330 && d.y > 70 && d.y < 830 && !underHud) {
+              return [n.id, [d.x, d.y]];
+            }
+          }
+          return [null, null];
+        }""")
         if dom:
             page.mouse.move(dom[0], dom[1])
             page.mouse.down()

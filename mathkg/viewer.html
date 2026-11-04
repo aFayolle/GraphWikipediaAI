@@ -136,8 +136,13 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
-    // No permanent pin: pinning made a node impossible to grab a second time
-    // ("it doesn't move any more, the others come to it"). Physics owns it again.
+    // Freeze once the drag ends: the node stays where it was dropped instead of
+    // being pulled 72% of the way back, and it can be grabbed again immediately.
+    // (A `fixed` pin achieved the same thing but made re-dragging impossible.)
+    if (network) {
+      network.stopSimulation();
+      network.setOptions({ physics: { enabled: false } });
+    }
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
