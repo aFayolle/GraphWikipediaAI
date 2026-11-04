@@ -56,6 +56,13 @@
   <span id="spec-detail" class="dim"></span>
 </div>
 <div id="status">connecting…</div>
+<button id="reheat" title="re-run the physics">reheat</button>
+<style>
+  #reheat { position: absolute; right: 16px; bottom: 14px; z-index: 5;
+    background: rgba(16,35,58,.9); color: #dbe7f8; border: 1px solid rgba(120,170,255,.28);
+    border-radius: 8px; padding: 7px 14px; font-size: 12px; cursor: pointer; }
+  #reheat:hover { background: #1e2f4d; }
+</style>
 
 <script>
 const netEl = document.getElementById("net");
@@ -74,6 +81,8 @@ const started = Date.now();
 // with ?motion when you want to see it.
 const STATIC = !location.search.includes("motion");
 window.__motionTicks = 0;
+window.__styleEvents = 0;
+window.__lastStyle = null;
 window.__motionNodes = 0;
 
 const BG = "#05070c";
@@ -82,12 +91,21 @@ const LABEL = "#eaf2ff";
 function initNetwork(usePhysics) {
   if (network) network.destroy();
   network = new vis.Network(netEl, { nodes, edges }, {
-    physics: usePhysics
-      ? { solver: "forceAtlas2Based", stabilization: { iterations: 250 },
-          forceAtlas2Based: { gravitationalConstant: -60, centralGravity: 0.01,
-                              springLength: 110, springStrength: 0.02, damping: 0.45 } }
-      : false,
-    interaction: { hover: true, tooltipDelay: 140, hideEdgesOnDrag: true },
+    // Physics on regardless of incoming positions: the whole point is to feel the
+    // repulsion. Server positions are only the starting point.
+    physics: {
+      enabled: true,
+      solver: "forceAtlas2Based",
+      stabilization: { enabled: true, iterations: 150, updateInterval: 25 },
+      forceAtlas2Based: {
+        // Weak springs (0.02) meant dragging a hub moved one neighbour: the
+        // forces were far too slack to propagate. These values make the pull
+        // visible without the layout exploding.
+        gravitationalConstant: -120, centralGravity: 0.005,
+        springLength: 150, springStrength: 0.12, damping: 0.35
+      }
+    },
+    interaction: { hover: true, tooltipDelay: 140, hideEdgesOnDrag: false },
     edges: {
       color: { inherit: "from", opacity: 0.30 },
       smooth: { type: "continuous", roundness: 0.22 },
@@ -107,6 +125,10 @@ function initNetwork(usePhysics) {
 
   network.on("dragStart", params => {
     dragging = true;
+    // A converged layout has zero net force, so nothing visibly reacts. Waking
+    // the simulation on grab is what makes a drag *feel* like repulsion.
+    network.setOptions({ physics: { enabled: true } });
+    network.startSimulation();
     // Remember what is being dragged so its base position can be updated on
     // release. Without that the animation loop snapped the node straight back
     // to where it started, which is what "dragging works badly" meant.
@@ -114,6 +136,12 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
+    // Pin it where it was dropped: with physics on, an unpinned node is pulled
+    // straight back and dragging becomes pointless.
+    if (dragged) {
+      const p = network.getPositions([dragged])[dragged];
+      if (p) nodes.update({ id: dragged, x: p.x, y: p.y, fixed: { x: true, y: true } });
+    }
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -223,7 +251,10 @@ async function loadGraph() {
     title: n.title || n.id,
     x: n.x,
     y: n.y,
-    physics: n.x === undefined,
+    // NOTE: no per-node `physics` flag here. Setting it false for every node
+    // (because the server always supplies positions) silently opted the whole
+    // graph out of the simulation: physics looked enabled but nothing moved,
+    // and dragging a hub propagated to nothing."
     size: n.size,
     color: n.color,
     degree: n.degree,
@@ -240,6 +271,12 @@ async function loadGraph() {
 
   setTimeout(() => {
     if (network) network.fit({ animation: { duration: 600 } });
+    // vis-network stops the simulation once stabilization converges, so the
+    // "repulsion" never runs afterwards. Force it back on.
+    if (network) {
+      network.setOptions({ physics: { enabled: true } });
+      network.startSimulation();
+    }
     if (STATIC) { setStatus("static view — add nothing to the URL for motion"); }
     else { startMotion(base); }
   }, 1200);
@@ -249,6 +286,8 @@ async function loadGraph() {
 }
 
 function applyStyle(payload) {
+  window.__styleEvents += 1;
+  window.__lastStyle = payload;
   nodes.update(payload.nodes.map(n => ({
     id: n.id,
     size: n.size,
