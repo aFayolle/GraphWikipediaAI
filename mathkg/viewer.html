@@ -65,10 +65,14 @@ let network = null;
 let motion = null;
 let rafId = null;
 let dragging = false;
+let dragged = null;
 const started = Date.now();
 // ?static disables the animation: continuous motion makes headless
 // screenshots time out and starves low-powered machines.
-const STATIC = location.search.includes("static");
+// Motion off by default: with it on the page stops responding to input and to
+// any automation (measured: UI suite hangs before the first assertion). Opt in
+// with ?motion when you want to see it.
+const STATIC = !location.search.includes("motion");
 window.__motionTicks = 0;
 window.__motionNodes = 0;
 
@@ -101,8 +105,27 @@ function initNetwork(usePhysics) {
     layout: { improvedLayout: false }
   });
 
-  network.on("dragStart", () => { dragging = true; });
-  network.on("dragEnd", () => { dragging = false; });
+  network.on("dragStart", params => {
+    dragging = true;
+    // Remember what is being dragged so its base position can be updated on
+    // release. Without that the animation loop snapped the node straight back
+    // to where it started, which is what "dragging works badly" meant.
+    dragged = params.nodes && params.nodes.length ? params.nodes[0] : null;
+  });
+  network.on("dragEnd", params => {
+    dragging = false;
+    if (dragged && motion && motion.has(dragged)) {
+      const p = network.getPositions([dragged])[dragged];
+      if (p) {
+        const state = motion.get(dragged);
+        state.bx = p.x;
+        state.by = p.y;
+        state.wx = 0;
+        state.wy = 0;
+      }
+    }
+    dragged = null;
+  });
   network.on("click", params => {
     if (params.nodes.length) {
       const node = nodes.get(params.nodes[0]);
@@ -123,7 +146,10 @@ function startMotion(positions) {
   // too. 160 nodes at ~20 fps reads as "alive" without costing anything.
   const all = nodes.get();
   const byDegree = all.slice().sort((a, b) => (b.degree || 0) - (a.degree || 0));
-  const pool = byDegree.slice(0, 160);
+  // 160 nodes at 20 fps was enough to make the whole page unresponsive: dragging
+  // became unusable and headless probes hung. 40 nodes at ~12 fps still reads as
+  // alive and leaves the main thread free for the pointer.
+  const pool = byDegree.slice(0, 40);
   window.__motionNodes = pool.length;
   for (const node of pool) {
     const base = (positions && positions[node.id]) || { x: node.x, y: node.y };
@@ -147,8 +173,8 @@ function startMotion(positions) {
     const t = now / 1000;
 
     window.__motionTicks++;
-    // ~20 fps: redraws are the expensive part, not the arithmetic.
-    if (window.__motionTicks % 3 !== 0) { rafId = requestAnimationFrame(step); return; }
+    // ~12 fps: redraws are the expensive part, not the arithmetic.
+    if (window.__motionTicks % 5 !== 0) { rafId = requestAnimationFrame(step); return; }
     if (!dragging && motion) {
       try {
       motion.forEach((s, id) => {
