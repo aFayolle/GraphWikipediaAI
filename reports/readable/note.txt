@@ -1,77 +1,59 @@
-MathKG — v2 : ce que j'ai tenté, ce qui a échoué, et ce que je livre
+MathKG — ForceAtlas2 en action : voir le graphe s'ouvrir
 
-Suite de la note précédente. Tu m'as dit "vas-y, ne t'arrête pas avant que je
-reçoive un mail". En voici un, avec un résultat négatif assumé plutôt qu'un
-énième dessin présenté comme beau.
+Pièce jointe : mathkg_forceatlas2.html — un lecteur autonome (canvas, aucune
+librairie) qui joue 16 images de ForceAtlas2, produites par Gephi lui-même
+(Toolkit, en headless), 40 itérations par image, 600 au total.
+Boutons lecture/pause/vitesse. Pour figer une image : ajouter
+?static&frame=12 à l'URL (frames 0 à 15).
 
-1. CE QUE J'AI CONSTRUIT DEPUIS (et qui répond à tes deux idées)
+1. CE QUE TU VOULAIS, ET CE QUE J'AI CORRIGÉ
 
-Embedding structurel (spectral) : au lieu de TF-IDF sur les résumés — qui
-regroupe par vocabulaire — j'ai calculé une décomposition de l'adjacence
-normalisée du graphe. Deux notions proches dans le graphe de dépendances sont
-proches ici même si leurs résumés ne partagent aucun mot. C'est ta demande :
-exploiter l'espace d'embedding des nœuds, mais sur la structure.
+Tu voulais sentir la répulsion et voir le graphe s'ouvrir au fur et à mesure.
+Le problème de mes envois précédents : je te livrais une disposition FINALE,
+calculée hors ligne. Tu ne voyais donc jamais le mouvement, et tu avais raison
+de dire que ça ressemblait à networkx.
 
-k-medoids + couleur par distance aux foyers : conservé de la v1, testé avec
-k = 6, 10 et 14.
+Ici les images sont prises pendant l'exécution de l'algo, et surtout toutes
+dessinées dans UN SEUL repère fixe (celui de la dernière image). Si je normalisais
+chaque image sur le canevas, le graphe paraîtrait immobile en grandissant : le
+cadrage compenserait exactement l'expansion. C'est ce piège qui rendait mes
+visualisations précédentes plates.
 
-Disposition par composantes connexes : au lieu d'une seule force dirigée qui
-fusionne tout en une boule, chaque composante connexe est disposée dans sa
-propre cellule d'une grille. C'était censé faire apparaître des îles.
+2. LA MESURE : LA RÉPULSION MARCHE, ET VOICI OÙ ELLE S'ARRÊTE
 
-Silhouette : j'ai ajouté la mesure qui correspond exactement à ta critique
-"on ne peut pas distinguer de régions". Silhouette proche de 1 = îlots nets,
-proche de 0 = tout se recouvre, négative = les clusters sont pires qu'un
-tirage au hasard.
+  itération   recouvrement nœuds   plus proche voisin
+       40          0.584 %              1.54 px
+      160          0.333 %              1.13 px
+      320          0.294 %              1.19 px
+      600          0.323 %              1.13 px
 
-2. LE RÉSULTAT : LA V2 EST PIRE QUE LA V1, ET C'EST MESURÉ
+Le recouvrement baisse de 0.58 % à 0.33 %, essentiellement dans les 200
+premières itérations, puis plateau : c'est ForceAtlas2 qui converge. Donc oui,
+les nœuds se repoussent, et oui ça se voit.
 
-                          v1 (lexical)      v2 (structurel + composantes)
-  silhouette              —                 -0.055   (pire qu'aléatoire)
-  plus proche voisin      2.06 px           1.19 px
-  recouvrement nœuds      0.043 %           0.910 %
-  collisions étiquettes   0.67 %            7.33 %
-  croisements arêtes      2.46 %            7.48 %
+Mais regarde la deuxième colonne : la distance au plus proche voisin ne bouge
+presque pas (1.54 -> 1.13 px). Le graphe s'étale, sans pour autant devenir
+aéré. Deux causes, visibles sur les images :
 
-Trois conclusions, toutes désagréables :
+- les points roses isolés très loin du nuage (à droite et en bas) : quelques
+  nœuds mal connectés partent à l'infini et imposent l'échelle. Le cœur du
+  graphe est donc écrasé pour que ces outliers tiennent dans le cadre.
+- 474 nœuds sur 1600x1000, c'est ~7 px² par nœud : même parfaitement réparti,
+  ça ne peut pas être aéré.
 
-a) L'embedding structurel ne sépare pas mieux que le lexical. Silhouette
-   négative dans les deux cas : à cette échelle, ce graphe n'a pas de
-   communautés séparables dans les deux projections testées. Les "régions" que
-   tu cherches n'existent peut-être pas dans ces données — c'est une hypothèse à
-   tester, pas un défaut de réglage.
+3. CE QUE JE FERAIS POUR QUE ÇA S'OUVRE VRAIMENT
 
-b) Le packaging des composantes dégrade tout. La composante géante (la quasi
-   totalité du graphe) occupe une cellule, et les petites composantes sont
-   comprimées dans des cellules minuscules où elles se chevauchent. Idée
-   séduisante, résultat contre-productif : je la retire.
+- Retirer les outliers : couper les nœuds de degré 1 ET ceux dont la distance au
+  centroïde dépasse le 95e centile. C'est eux qui dictent l'échelle, pas le cœur.
+- Ou passer à 150-200 nœuds (min_degree 6-7) : à ce compte la distance au plus
+  proche voisin passe au-dessus du diamètre d'un nœud et ça devient lisible.
+- Si tu veux la sensation "live" dans le navigateur (pas une animation
+  précalculée), c'est vis-network avec le solveur forceAtlas2Based, mais il faut
+  rester sous ~300 nœuds sinon ça saccade — c'est exactement ce qui s'est passé
+  avec 779 nœuds la dernière fois.
 
-c) Mon propre score composite choisit min_degree=4 en v2 alors que la v1
-   mesurait mieux à min_degree=5. Autrement dit, mes métriques ne sont pas
-   encore assez fiables pour arbitrer seules. À discuter avant de s'appuyer
-   dessus.
+Dis-moi laquelle des trois et je l'enchaîne.
 
-3. CE QUE JE LIVRE
-
-La meilleure version mesurée reste celle de la note précédente, et c'est elle
-qui est jointe (mathkg_readable.html) : 194 nœuds, 327 arêtes, min_degree 5,
-recouvrement 0.043 %, plus proche voisin 2.06 px, collisions d'étiquettes
-0.67 %. Avec deux modes de couleur commutables (distance aux foyers vs PCA->RGB)
-et la table complète des 42 candidats.
-
-Le CSV joint (candidates.csv) contient les 15 candidats de la v2 avec leurs
-métriques, pour que tu puisses contester mes chiffres.
-
-4. CE QUE JE PROPOSERAIS MAINTENANT, SANS FARD
-
-- Arrêter d'espérer des régions dans CE graphe. Le tester : prendre un
-  sous-ensemble franchement séparé (algèbre vs probabilités, via les 12 champs
-  de fields_of_math.csv) et mesurer la silhouette. Si elle reste négative là
-  aussi, la question "où sont les régions" n'a pas de réponse dans ces données.
-- Ou changer de données : les liens de section de preuve ne portent pas de
-  signal de domaine. Les catégories Wikipédia, ou les propriétés P361/P527,
-  porteraient davantage de domaine que les citations de preuve.
-- node2vec (marches aléatoires + skip-gram) reste non testé : gensim n'est pas
-  installé et je ne voulais pas l'installer sans ton accord.
-
-Dis-moi laquelle de ces trois directions tu veux, et je m'y mets.
+Fichiers : reports/animation/{mathkg_forceatlas2.html, animation.json,
+frame_early.png, frame_late.png}. Régénérable par
+PYTHONPATH=. python tools/make_animation.py 600 40 3

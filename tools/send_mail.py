@@ -6,10 +6,11 @@ from email.message import EmailMessage
 from pathlib import Path
 
 CONFIG = Path.home() / ".config" / "enwise" / "mail.env"
-HTML = Path("reports/readable/mathkg_readable.html")
+HTML = Path("reports/animation/mathkg_forceatlas2.html")
 NOTE = Path("reports/readable/note.txt")
 EXTRA = [
-    Path("reports/readable_v2/candidates.csv"),
+    Path("reports/animation/frame_early.png"),
+    Path("reports/animation/frame_late.png"),
 ]
 
 def config() -> dict[str, str]:
@@ -33,7 +34,7 @@ def main() -> int:
     message = EmailMessage()
     message["From"] = user
     message["To"] = dest
-    message["Subject"] = "[MathKG] Un graphe lisible — mesures, embeddings, et ce que ça ne résout pas"
+    message["Subject"] = "[MathKG] ForceAtlas2 en action — voir le graphe s'ouvrir (16 images)"
     message.set_content(NOTE.read_text(encoding="utf-8"))
     message.add_attachment(
         HTML.read_bytes(), maintype="text", subtype="html", filename=HTML.name
@@ -41,7 +42,7 @@ def main() -> int:
     for path in EXTRA:
         if path.exists():
             message.add_attachment(
-                path.read_bytes(), maintype="text", subtype="csv", filename=path.name
+                path.read_bytes(), maintype="image", subtype="png", filename=path.name
             )
 
     context = ssl.create_default_context()

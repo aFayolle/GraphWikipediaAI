@@ -26,6 +26,18 @@ import org.openide.util.Lookup;
  */
 public class GephiToolkitLayout {
 
+    /** One coordinate snapshot, in the same TSV shape used for the final result. */
+    static void writeFrame(Graph graph, File target) throws Exception {
+        try (PrintWriter writer = new PrintWriter(target, "UTF-8")) {
+            writer.println("id\tx\ty");
+            for (Node node : graph.getNodes()) {
+                writer.println(node.getId() + "\t"
+                        + String.format(Locale.ROOT, "%.6f", node.x()) + "\t"
+                        + String.format(Locale.ROOT, "%.6f", node.y()));
+            }
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("usage: GephiToolkitLayout <in.gexf> <out.tsv> [iterations] [linlog]");
@@ -36,6 +48,7 @@ public class GephiToolkitLayout {
         int iterations = args.length > 2 ? Integer.parseInt(args[2]) : 500;
         boolean linLog = args.length > 3 && Boolean.parseBoolean(args[3]);
         boolean randomize = args.length > 4 && Boolean.parseBoolean(args[4]);
+        int stride = args.length > 5 ? Integer.parseInt(args[5]) : 0;   // 0 = only at the end
 
         ProjectController projectController = Lookup.getDefault().lookup(ProjectController.class);
         projectController.newProject();
@@ -95,19 +108,17 @@ public class GephiToolkitLayout {
         while (done < iterations && layout.canAlgo()) {
             layout.goAlgo();
             done++;
+            // Emit a frame so the opening can be watched instead of only
+            // consumed as a final result.
+            if (stride > 0 && done % stride == 0) {
+                writeFrame(graph, new File(output.getPath() + "." + done + ".tsv"));
+            }
         }
         layout.endAlgo();
         System.out.println("Gephi ForceAtlas2: " + done + " iterations in "
                 + (System.currentTimeMillis() - started) + " ms");
 
-        try (PrintWriter writer = new PrintWriter(output, "UTF-8")) {
-            writer.println("id\tx\ty");
-            for (Node node : graph.getNodes()) {
-                writer.println(node.getId() + "\t"
-                        + String.format(Locale.ROOT, "%.6f", node.x()) + "\t"
-                        + String.format(Locale.ROOT, "%.6f", node.y()));
-            }
-        }
+        writeFrame(graph, output);
         System.out.println("wrote " + output + " (" + graph.getNodeCount() + " positions)");
     }
 }
