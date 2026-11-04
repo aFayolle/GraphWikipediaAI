@@ -296,3 +296,121 @@ def layout_quality(
         "density": len(nodes) / area * 1e6,
         "bbox": span,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Structural embedding (spectral) and component packing
+# --------------------------------------------------------------------------- #
+
+def spectral_embedding(graph, dims: int = 50, seed: int = 0) -> tuple[list[str], np.ndarray]:
+    """Spectral embedding of the normalised graph Laplacian.
+
+    The point of this over TF-IDF is *structure*: two notions that sit in the
+    same neighbourhood of the dependency graph are close here even if their
+    summaries share no words. It uses the smallest non-trivial eigenvectors,
+    which is the standard spectral-clustering embedding.
+    """
+    import networkx as nx
+    from scipy.sparse import csr_matrix, diags
+    from scipy.sparse.linalg import svds
+
+    nodes = sorted(graph.nodes)
+    index = {node: i for i, node in enumerate(nodes)}
+    undirected = graph.to_undirected()
+
+    rows, cols = [], []
+    for a, b in undirected.edges():
+        i, j = index[a], index[b]
+        rows.append(i); cols.append(j)
+        rows.append(j); cols.append(i)
+    data = np.ones(len(rows), dtype=float)
+    adjacency = csr_matrix((data, (rows, cols)), shape=(len(nodes), len(nodes)))
+    degree = np.asarray(adjacency.sum(axis=1)).ravel()
+    degree[degree == 0] = 1.0
+    inv_sqrt = diags(1.0 / np.sqrt(degree))
+
+    # SVD of the normalised adjacency instead of eigsh(laplacian, sigma=0): the
+    # Laplacian is singular by construction, so shift-invert factorisation fails
+    # with "Factor is exactly singular". The leading singular directions of the
+    # normalised adjacency span the same cluster structure.
+    normalized = inv_sqrt @ adjacency @ inv_sqrt
+    k = min(dims, len(nodes) - 2)
+    u, s, _ = svds(csr_matrix(normalized), k=k, random_state=seed)
+    order = np.argsort(s)[::-1]
+    embeddings = u[:, order] * s[order]
+    log.info("spectral embedding: %d nodes x %d dims", len(nodes), embeddings.shape[1])
+    return nodes, embeddings
+
+
+def pack_components(
+    graph, positions: dict[str, tuple[float, float]], padding: float = 0.15
+) -> dict[str, tuple[float, float]]:
+    """Lay each weakly connected component out on its own cell of a grid.
+
+    A single force-directed layout merges all components into one blob, which is
+    why no regions were distinguishable. Packing them into separate cells makes
+    each island visible and stops small components from being hidden inside the
+    giant one.
+    """
+    import networkx as nx
+
+    components = sorted(nx.weakly_connected_components(graph), key=len, reverse=True)
+    if len(components) <= 1:
+        return dict(positions)
+
+    # cell size grows with the square root of the component size
+    sizes = [max(1, len(c)) for c in components]
+    total = sum(np.sqrt(s) for s in sizes) or 1.0
+    columns = max(1, int(math.ceil(math.sqrt(len(components)))))
+    cell = max(1.0, total / columns) * (1.0 + padding)
+
+    packed: dict[str, tuple[float, float]] = {}
+    for order_index, component in enumerate(components):
+        row, column = divmod(order_index, columns)
+        members = [n for n in component if n in positions]
+        if not members:
+            continue
+        xs = np.array([positions[n][0] for n in members])
+        ys = np.array([positions[n][1] for n in members])
+        width = float(np.ptp(xs)) or 1.0
+        height = float(np.ptp(ys)) or 1.0
+        span = max(width, height)
+        local = min(1.0, cell / span) if span else 1.0
+        centre_x = (column + 0.5) * cell
+        centre_y = (row + 0.5) * cell
+        for node in members:
+            packed[node] = (
+                centre_x + (positions[node][0] - (xs.min() + width / 2)) * local,
+                centre_y + (positions[node][1] - (ys.min() + height / 2)) * local,
+            )
+    return packed
+
+
+def silhouette(points: np.ndarray, labels: list[str], sample: int = 300, seed: int = 0) -> float:
+    """Mean silhouette: how well separated the clusters are.
+
+    This is the direct answer to "I cannot tell the regions apart": values near 1
+    mean clean islands, near 0 mean overlapping mush.
+    """
+    names = sorted(set(labels))
+    if len(names) < 2:
+        return 0.0
+    encode = {name: index for index, name in enumerate(names)}
+    encoded = np.array([encode[label] for label in labels])
+    rng = np.random.default_rng(seed)
+    take = rng.choice(len(points), size=min(sample, len(points)), replace=False)
+
+    scores = []
+    for i in take:
+        own = encoded == encoded[i]
+        if own.sum() <= 1:
+            continue
+        same = np.linalg.norm(points[own] - points[i], axis=1)
+        a = same.sum() / (own.sum() - 1)
+        b = min(
+            np.linalg.norm(points[encoded == other] - points[i], axis=1).mean()
+            for other in range(len(names))
+            if other != encoded[i] and (encoded == other).any()
+        ) if len(names) > 1 else a
+        scores.append((b - a) / max(a, b, 1e-9))
+    return float(np.mean(scores)) if scores else 0.0

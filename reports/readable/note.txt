@@ -1,62 +1,77 @@
-MathKG — un graphe enfin lisible, et la mesure de ce qui n'allait pas
+MathKG — v2 : ce que j'ai tenté, ce qui a échoué, et ce que je livre
 
-Tu avais raison sur les deux points : c'était illisible, et je l'avais affirmé
-"sans avoir mesuré le bazar". Voici la mesure, puis ce que j'ai construit.
+Suite de la note précédente. Tu m'as dit "vas-y, ne t'arrête pas avant que je
+reçoive un mail". En voici un, avec un résultat négatif assumé plutôt qu'un
+énième dessin présenté comme beau.
 
-1. LA MESURE (ce que j'aurais dû faire dès le début)
+1. CE QUE J'AI CONSTRUIT DEPUIS (et qui répond à tes deux idées)
 
-J'ai converti chaque disposition en pixels écran (1600x1000) avant de la juger,
-puis compté quatre choses : recouvrement des nœuds, distance au plus proche
-voisin, taux de croisement des arêtes, collisions d'étiquettes.
+Embedding structurel (spectral) : au lieu de TF-IDF sur les résumés — qui
+regroupe par vocabulaire — j'ai calculé une décomposition de l'adjacence
+normalisée du graphe. Deux notions proches dans le graphe de dépendances sont
+proches ici même si leurs résumés ne partagent aucun mot. C'est ta demande :
+exploiter l'espace d'embedding des nœuds, mais sur la structure.
 
-Verdict pour le graphe complet (1 560 nœuds) : distance médiane au plus proche
-voisin = 1,13 px. Les nœuds sont plus proches que leur propre rayon. Aucun
-choix de couleur, de taille ou de style ne peut rattraper ça : le problème est
-la densité, pas la décoration.
+k-medoids + couleur par distance aux foyers : conservé de la v1, testé avec
+k = 6, 10 et 14.
 
-Le tableau complet (7 tailles de sous-graphe x 3 dispositions x 2 cadrages) est
-dans le HTML joint. Résultat honnête : aucun candidat n'atteint le seuil que
-j'avais fixé d'avance (3 px). Le meilleur est 194 nœuds, 327 arêtes :
+Disposition par composantes connexes : au lieu d'une seule force dirigée qui
+fusionne tout en une boule, chaque composante connexe est disposée dans sa
+propre cellule d'une grille. C'était censé faire apparaître des îles.
 
-  recouvrement 0,043 %   plus proche voisin 2,06 px
-  croisements 2,46 %     collisions d'étiquettes 0,67 %
+Silhouette : j'ai ajouté la mesure qui correspond exactement à ta critique
+"on ne peut pas distinguer de régions". Silhouette proche de 1 = îlots nets,
+proche de 0 = tout se recouvre, négative = les clusters sont pires qu'un
+tirage au hasard.
 
-2. CE QUI MARCHE, ET CE QUI NE MARCHE PAS
+2. LE RÉSULTAT : LA V2 EST PIRE QUE LA V1, ET C'EST MESURÉ
 
-Embeddings : TF-IDF sur titre + résumé d'intro, puis SVD tronquée à 50 dims
-(LSA). Hors ligne, aucun modèle à télécharger.
+                          v1 (lexical)      v2 (structurel + composantes)
+  silhouette              —                 -0.055   (pire qu'aléatoire)
+  plus proche voisin      2.06 px           1.19 px
+  recouvrement nœuds      0.043 %           0.910 %
+  collisions étiquettes   0.67 %            7.33 %
+  croisements arêtes      2.46 %            7.48 %
 
-Foyers : k-medoids (PAM simplifié) sur ces 50 dimensions, donc un foyer est un
-article réel et pas une moyenne. Pour ce sous-graphe : Morley's trisector
-theorem, Ingleton's inequality, Monstrous moonshine, Nielsen–Ninomiya theorem.
+Trois conclusions, toutes désagréables :
 
-Couleur : distance aux foyers, poids exp(-d²/sigma), mélange des 3 plus proches.
-Un nœud entre deux domaines prend une couleur intermédiaire au lieu d'être
-forcé dans une classe.
+a) L'embedding structurel ne sépare pas mieux que le lexical. Silhouette
+   négative dans les deux cas : à cette échelle, ce graphe n'a pas de
+   communautés séparables dans les deux projections testées. Les "régions" que
+   tu cherches n'existent peut-être pas dans ces données — c'est une hypothèse à
+   tester, pas un défaut de réglage.
 
-Ce qui ne marche pas : les clusters obtenus sont LEXICAUX, pas mathématiques.
-Deux notions sans rapport qui partagent du vocabulaire de théorème se
-retrouvent proches. Et disposer le graphe selon l'ACP de ces embeddings est
-pire qu'une force dirigée (croisements 15-17 % contre 2,5 %) : un sac de mots
-s'effondre en boule floue.
+b) Le packaging des composantes dégrade tout. La composante géante (la quasi
+   totalité du graphe) occupe une cellule, et les petites composantes sont
+   comprimées dans des cellules minuscules où elles se chevauchent. Idée
+   séduisante, résultat contre-productif : je la retire.
 
-3. LA VRAIE LIMITE
+c) Mon propre score composite choisit min_degree=4 en v2 alors que la v1
+   mesurait mieux à min_degree=5. Autrement dit, mes métriques ne sont pas
+   encore assez fiables pour arbitrer seules. À discuter avant de s'appuyer
+   dessus.
 
-Sur un canevas fixe de 1600x1000, ce graphe reste dense quelle que soit la
-disposition. La sortie honnête n'est donc pas "un plus beau dessin" mais un
-canevas plus grand que l'écran : le HTML joint est panoramique (molette / zoom),
-donc la zone lisible n'est plus bornée par la taille de la fenêtre.
+3. CE QUE JE LIVRE
 
-4. CE QUE JE FERAIS ENSUITE
+La meilleure version mesurée reste celle de la note précédente, et c'est elle
+qui est jointe (mathkg_readable.html) : 194 nœuds, 327 arêtes, min_degree 5,
+recouvrement 0.043 %, plus proche voisin 2.06 px, collisions d'étiquettes
+0.67 %. Avec deux modes de couleur commutables (distance aux foyers vs PCA->RGB)
+et la table complète des 42 candidats.
 
-- Embeddings de voisinage (node2vec/DeepWalk) au lieu du sac de mots : ça
-  capturerait la structure du graphe, pas le vocabulaire des résumés.
-- Ou des embeddings de phrases (un vrai modèle), si tu acceptes le
-  téléchargement.
-- Séparer les composantes connexes et les disposer côte à côte plutôt que de
-  les entasser.
-- Le filtre min_degree >= 5 est un choix de lisibilité, pas de science : il
-  jette 87 % du graphe. C'est un curseur à discuter, pas une décision.
+Le CSV joint (candidates.csv) contient les 15 candidats de la v2 avec leurs
+métriques, pour que tu puisses contester mes chiffres.
 
-Fichiers : reports/readable/{mathkg_readable.html, graph.json, nodes.csv,
-centres.csv}. Régénérable par PYTHONPATH=. python tools/make_readable.py.
+4. CE QUE JE PROPOSERAIS MAINTENANT, SANS FARD
+
+- Arrêter d'espérer des régions dans CE graphe. Le tester : prendre un
+  sous-ensemble franchement séparé (algèbre vs probabilités, via les 12 champs
+  de fields_of_math.csv) et mesurer la silhouette. Si elle reste négative là
+  aussi, la question "où sont les régions" n'a pas de réponse dans ces données.
+- Ou changer de données : les liens de section de preuve ne portent pas de
+  signal de domaine. Les catégories Wikipédia, ou les propriétés P361/P527,
+  porteraient davantage de domaine que les citations de preuve.
+- node2vec (marches aléatoires + skip-gram) reste non testé : gensim n'est pas
+  installé et je ne voulais pas l'installer sans ton accord.
+
+Dis-moi laquelle de ces trois directions tu veux, et je m'y mets.

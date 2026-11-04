@@ -8,6 +8,9 @@ from pathlib import Path
 CONFIG = Path.home() / ".config" / "enwise" / "mail.env"
 HTML = Path("reports/readable/mathkg_readable.html")
 NOTE = Path("reports/readable/note.txt")
+EXTRA = [
+    Path("reports/readable_v2/candidates.csv"),
+]
 
 def config() -> dict[str, str]:
     values = {}
@@ -35,6 +38,11 @@ def main() -> int:
     message.add_attachment(
         HTML.read_bytes(), maintype="text", subtype="html", filename=HTML.name
     )
+    for path in EXTRA:
+        if path.exists():
+            message.add_attachment(
+                path.read_bytes(), maintype="text", subtype="csv", filename=path.name
+            )
 
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=90) as server:
