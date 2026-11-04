@@ -236,10 +236,80 @@ function applyStyle(payload) {
   setStatus(`style applied in ${Date.now() - payload.sent} ms · spec v${payload.version}`);
 }
 
+
+/* ------------------------------------------------------------------ */
+/* ForceAtlas2 playback: the server streams Gephi's own frames.        */
+/* Physics stays off; the positions come from Gephi, frame by frame.   */
+/* ------------------------------------------------------------------ */
+let playback = null;
+
+function playFrames(payload) {
+  stopMotion();
+  if (network) network.setOptions({ physics: { enabled: false } });
+  const ids = payload.nodes;
+  playback = {
+    ids,
+    frames: payload.frames,
+    index: 0,
+    alpha: 0,
+    started: performance.now(),
+    perFrame: 220                         // ms per frame, ~4.5 fps: visible, not frantic
+  };
+  setStatus(`ForceAtlas2 streaming: ${payload.frames.length} frames, `
+            + `${ids.length} nodes, scaling ${payload.scaling}`);
+  requestFrame();
+}
+
+function requestFrame() {
+  if (!playback) return;
+  requestAnimationFrame(stepFrame);
+}
+
+function stepFrame(now) {
+  if (!playback) return;
+  const { ids, frames } = playback;
+  const a = frames[playback.index];
+  const b = frames[Math.min(playback.index + 1, frames.length - 1)];
+  playback.alpha += 16.7 / playback.perFrame;
+
+  if (playback.alpha >= 1) {
+    playback.alpha = 0;
+    playback.index += 1;
+    if (playback.index >= frames.length - 1) {
+      playback.index = frames.length - 1;
+      applyPositions(ids, frames[frames.length - 1].points, 1);
+      // The incoming frames use their own coordinate range; without a re-fit the
+      // camera still frames the *previous* layout and the graph lands off-screen.
+      if (network) network.fit({ animation: { duration: 500 } });
+      setStatus(`ForceAtlas2 settled after ${frames[frames.length - 1].iteration} iterations`);
+      playback = null;
+      return;
+    }
+  }
+  applyPositions(ids, a.points, playback.alpha, b.points);
+  requestAnimationFrame(stepFrame);
+}
+
+function applyPositions(ids, points, alpha, next) {
+  const updates = [];
+  for (let i = 0; i < ids.length; i++) {
+    const p = points[i];
+    if (!p) continue;
+    let x = p[0], y = p[1];
+    if (next && next[i] && alpha > 0) {
+      x += (next[i][0] - x) * alpha;
+      y += (next[i][1] - y) * alpha;
+    }
+    updates.push({ id: ids[i], x, y });
+  }
+  nodes.update(updates);
+}
+
 function connect() {
   const source = new EventSource("/events");
   source.addEventListener("style", ev => applyStyle(JSON.parse(ev.data)));
   source.addEventListener("graph", () => loadGraph());
+  source.addEventListener("positions", ev => playFrames(JSON.parse(ev.data)));
   source.onopen = () => setStatus("live — waiting for changes");
   source.onerror = () => setStatus("disconnected, retrying…");
 }

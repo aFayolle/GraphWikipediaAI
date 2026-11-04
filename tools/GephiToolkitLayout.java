@@ -49,6 +49,7 @@ public class GephiToolkitLayout {
         boolean linLog = args.length > 3 && Boolean.parseBoolean(args[3]);
         boolean randomize = args.length > 4 && Boolean.parseBoolean(args[4]);
         int stride = args.length > 5 ? Integer.parseInt(args[5]) : 0;   // 0 = only at the end
+        double scaling = args.length > 6 ? Double.parseDouble(args[6]) : 10.0;
 
         ProjectController projectController = Lookup.getDefault().lookup(ProjectController.class);
         projectController.newProject();
@@ -92,7 +93,7 @@ public class GephiToolkitLayout {
         layout.setAdjustSizes(false);
         layout.setStrongGravityMode(false);
         layout.setGravity(1.0);
-        layout.setScalingRatio(10.0);
+        layout.setScalingRatio(scaling);
         layout.setJitterTolerance(1.0);
         layout.setEdgeWeightInfluence(1.0);
         layout.setBarnesHutOptimize(true);

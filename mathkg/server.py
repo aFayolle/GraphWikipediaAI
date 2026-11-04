@@ -384,6 +384,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "invalid JSON"}, 400)
             return
 
+        if path == "/animate":
+            self._handle_animate(body)
+            return
+
         if path == "/query":
             self._handle_query(body)
             return
@@ -399,6 +403,38 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json({"error": "not found"}, 404)
 
+
+
+    def _handle_animate(self, body: dict) -> None:
+        """Run Gephi's ForceAtlas2 and stream the frames to the browser.
+
+        This is the "watch it open" path, inside the same server that serves the
+        tab: one graph, one renderer, no separate artifact to diverge.
+        """
+        from . import animation
+
+        iterations = int(body.get("iterations", 400))
+        stride = int(body.get("stride", 40))
+        scaling = float(body.get("scaling", 10.0))
+        try:
+            result = animation.build_frames(
+                self.state.graph, iterations=iterations, stride=stride, scaling=scaling
+            )
+        except Exception as exc:  # surfaced, never swallowed
+            log.error("animate failed: %s", exc)
+            self._send_json({"error": str(exc)}, 500)
+            return
+
+        self.state.broadcast({"type": "positions", **result})
+        self._send_json(
+            {
+                "ok": True,
+                "frames": len(result["frames"]),
+                "nodes": len(result["nodes"]),
+                "scaling": scaling,
+                "iterations": iterations,
+            }
+        )
 
     def _handle_query(self, body: dict) -> None:
         """ego / path / describe. ego and path also swap the displayed graph."""
