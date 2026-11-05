@@ -104,56 +104,65 @@ def test_ego_of_absent_node_is_empty():
     assert ego_graph(chain_graph(), "nope").number_of_nodes() == 0
 
 
-# --- the MCP front end must not drift from the core -------------------------- #
+# --- the MCP front end must proxy, not reinvent --------------------------------- #
 
 def test_mcp_handshake_and_tool_list():
-    from mathkg.mcp_server import MathKGServer, handle
+    from mathkg.mcp_server import MathKGClient, handle
 
-    server = MathKGServer(graph=chain_graph(), spec=None)
-    init = handle(server, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    client = MathKGClient()
+    init = handle(client, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
     assert init["result"]["protocolVersion"]
     assert init["result"]["serverInfo"]["name"] == "mathkg"
 
-    listed = handle(server, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    listed = handle(client, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = {tool["name"] for tool in listed["result"]["tools"]}
     assert names == {
-        "get_state", "set_spec", "filter", "ego", "path",
-        "describe", "render_png", "reload_graph",
+        "get_state", "set_spec", "filter", "layout", "color_by", "ego", "path",
+        "describe", "reset", "centrality", "community", "select",
+        "render_png", "reload_graph",
     }
 
 
-def test_mcp_describe_matches_the_core():
-    """Same graph in, same numbers out: the MCP path must not reinvent anything."""
-    from mathkg.mcp_server import MathKGServer, handle
+def _fake_post(record):
+    def post(base, path, payload):
+        record.append((path, payload))
+        return {"ok": True, "path": path}
+    return post
 
-    graph = chain_graph()
-    server = MathKGServer(graph=graph, spec=None)
-    response = handle(server, {
+
+def test_mcp_describe_routes_to_query_endpoint():
+    """describe must proxy to the viewer's /query, not reimplement it."""
+    from mathkg.mcp_server import MathKGClient, handle
+
+    calls = []
+    client = MathKGClient(post=_fake_post(calls))
+    handle(client, {
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "describe", "arguments": {"node": "b"}},
     })
-    payload = json.loads(response["result"]["content"][0]["text"])
-    assert payload == describe(graph, "b")
+    assert calls == [("/query", {"kind": "describe", "node": "b"})]
 
 
-def test_mcp_set_spec_rejects_hostile_input():
-    from mathkg.mcp_server import MathKGServer, handle
+def test_mcp_set_spec_forwards_patch():
+    """set_spec forwards the raw patches; validation lives in the viewer now."""
+    from mathkg.mcp_server import MathKGClient, handle
 
-    server = MathKGServer(graph=chain_graph(), spec=None)
-    response = handle(server, {
+    calls = []
+    client = MathKGClient(post=_fake_post(calls))
+    handle(client, {
         "jsonrpc": "2.0", "id": 4, "method": "tools/call",
-        "params": {"name": "set_spec", "arguments": {"set": ["node.size=__import__('os')"]}},
+        "params": {"name": "set_spec", "arguments": {"set": ["node.size=6 + degree"]}},
     })
-    assert "error" in response
-    assert "whitelisted" in response["error"]["message"]
+    assert calls == [("/spec", {"set": ["node.size=6 + degree"]})]
 
 
-def test_mcp_ego_swaps_the_graph():
-    from mathkg.mcp_server import MathKGServer, handle
+def test_mcp_ego_routes_to_query_endpoint():
+    from mathkg.mcp_server import MathKGClient, handle
 
-    server = MathKGServer(graph=chain_graph(), spec=None)
-    handle(server, {
+    calls = []
+    client = MathKGClient(post=_fake_post(calls))
+    handle(client, {
         "jsonrpc": "2.0", "id": 5, "method": "tools/call",
         "params": {"name": "ego", "arguments": {"node": "b", "radius": 1}},
     })
-    assert set(server.state.graph.nodes) == {"a", "b", "c"}
+    assert calls == [("/query", {"kind": "ego", "node": "b", "radius": 1})]

@@ -323,6 +323,11 @@ def node_rows(graph: nx.Graph) -> dict[str, dict[str, Any]]:
             "kind": str(data.get("kind", "")) or "unknown",
             "is_anchor": bool(data.get("anchor", False)),
             "field": str(data.get("field", "")) or "unknown",
+            "betweenness": float(data.get("betweenness", 0) or 0),
+            "closeness": float(data.get("closeness", 0) or 0),
+            "eigenvector": float(data.get("eigenvector", 0) or 0),
+            "pagerank": float(data.get("pagerank", 0) or 0),
+            "community": int(data.get("community", -1)),
         }
         for node, data in graph.nodes(data=True)
     }
@@ -376,14 +381,17 @@ def edge_rows(graph: nx.Graph, mentions: pd.DataFrame | None) -> dict[tuple[str,
 
 
 #: Columns an expression may reference, by context.
-NODE_COLUMNS = {"degree", "sitelinks", "kind", "is_anchor", "field"}
+NODE_COLUMNS = {
+    "degree", "sitelinks", "kind", "is_anchor", "field",
+    "betweenness", "closeness", "eigenvector", "pagerank", "community",
+}
 EDGE_COLUMNS = {
     "confidence", "popularity", "occurrences", "relative_position", "in_lead", "in_proof",
 }
 LABEL_COLUMNS: set[str] = set()
 
 
-LAYOUTS = {"physics", "installed", "gephi", "layered", "forceatlas2", "spring"}
+LAYOUTS = {"physics", "installed", "gephi", "layered", "forceatlas2", "spring", "circular", "radial"}
 
 
 def validate_spec(spec: dict[str, Any]) -> None:

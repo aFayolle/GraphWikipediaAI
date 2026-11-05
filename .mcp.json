@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "mathkg": {
+      "command": ".venv/bin/python",
+      "args": ["-m", "mathkg.mcp_server"],
+      "env": {
+        "MATHKG_VIEWER_URL": "http://127.0.0.1:8765"
+      }
+    }
+  }
+}

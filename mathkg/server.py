@@ -48,6 +48,28 @@ def _pyvis_lib(relative: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def build_dependency_graph() -> nx.DiGraph:
+    """Rebuild the prerequisite DAG from disk, with the LLM field attached.
+
+    Used by ``POST /reload`` so the running viewer can refresh after the edges
+    stage re-runs, without going through run.py.
+    """
+    from . import config, dependency, edges as edges_module
+
+    frame = dependency.load_edges()
+    _, titles = edges_module.load_summaries()
+    dag = dependency.build_dag(frame, titles=set(titles))
+    dag, _ = dependency.break_cycles(dag)
+    dag = dependency.enrich_with_attributes(dag)
+    field_csv = config.PROJECT_ROOT / "reports" / "llm_fields.csv"
+    if field_csv.exists():
+        fields = pd.read_csv(field_csv, dtype=str, keep_default_na=False)
+        field = dict(zip(fields["title"], fields["llm_field"], strict=False))
+        for node in dag.nodes:
+            dag.nodes[node]["field"] = field.get(node, "") or "unknown"
+    return dag
+
+
 class ViewerState:
     """The graph, the spec, and the set of connected clients."""
 
@@ -144,6 +166,12 @@ class ViewerState:
             # was sub-pixel and the tab looked empty.
             return self._scale(positions)
 
+        if layout == "circular":
+            return self._scale(nx.circular_layout(self.graph))
+
+        if layout == "radial":
+            return self._scale(nx.shell_layout(self.graph))
+
         if layout != "layered":
             log.info("viewer: layout=%s has no server positions (physics on)", layout)
             return {}
@@ -203,7 +231,7 @@ class ViewerState:
     def _size_for(self, node: str) -> float:
         expression = self.spec.get("node", {}).get("size", 8)
         try:
-            value = view_module.evaluate(expression, self._node_columns[node], {"degree", "sitelinks", "kind", "is_anchor"})
+            value = view_module.evaluate(expression, self._node_columns[node], view_module.NODE_COLUMNS)
         except view_module.ExpressionError as exc:
             log.warning("bad node.size expression: %s", exc)
             value = 8
@@ -462,6 +490,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/state":
             self._send_json({"version": self.state.version, "spec": self.state.spec})
             return
+        if path == "/health":
+            self._send_json({
+                "ok": True,
+                "nodes": self.state.graph.number_of_nodes(),
+                "edges": self.state.graph.number_of_edges(),
+                "full_nodes": self.state._full_graph.number_of_nodes(),
+            })
+            return
         if path == "/events":
             self._stream_events()
             return
@@ -500,6 +536,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json({"ok": True, "version": message["version"], "detail": message["detail"]})
             return
+
+        if path == "/reload":
+            self._handle_reload()
+            return
+
+        if path == "/render_png":
+            self._handle_render_png(body)
+            return
+
+        if path == "/compute":
+            self._handle_compute(body)
+            return
+
+        if path == "/select":
+            self._handle_select(body)
+            return
+
         self._send_json({"error": "not found"}, 404)
 
 
@@ -583,6 +636,99 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"kind": "path", "chain": chain, "how": how, "steps": len(chain)})
             return
         self._send_json({"error": f"unknown query {kind!r}"}, 400)
+
+    def _handle_reload(self) -> None:
+        try:
+            new_graph = build_dependency_graph()
+        except Exception as exc:
+            log.error("reload failed: %s", exc)
+            self._send_json({"error": str(exc)}, 500)
+            return
+        self.state._full_graph = new_graph
+        self.state.replace_graph(new_graph.copy())
+        self._send_json({
+            "ok": True,
+            "nodes": new_graph.number_of_nodes(),
+            "edges": new_graph.number_of_edges(),
+        })
+
+    def _handle_render_png(self, body: dict) -> None:
+        from . import config, view_render
+
+        name = str(body.get("name", "mcp_render"))
+        safe = "".join(c for c in name if c.isalnum() or c in "._-") or "mcp_render"
+        figsize = float(body.get("figsize", 16))
+        out = config.ARTIFACT_DIR / "mcp" / f"{safe}.png"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            view_render.render_spec(
+                self.state.graph, self.state.spec, out,
+                mentions=self.state.mentions, figsize=(figsize, figsize * 0.7),
+            )
+        except Exception as exc:
+            log.error("render_png failed: %s", exc)
+            self._send_json({"error": str(exc)}, 500)
+            return
+        self._send_json({"path": str(out), "bytes": out.stat().st_size})
+
+    def _refresh_style(self) -> None:
+        """Recompute node columns and push a style delta (after attaching metrics)."""
+        self.state._node_columns = view_module.node_rows(self.state.graph)
+        self.state.broadcast(self.state.style_payload())
+
+    def _handle_compute(self, body: dict) -> None:
+        from . import analysis
+
+        kind = str(body.get("kind", "")).strip().lower()
+        full = self.state._full_graph
+
+        if kind in ("communities", "community"):
+            partition, modularity = analysis.communities(
+                full, resolution=float(body.get("resolution", 1.0)))
+            for node, cid in partition.items():
+                full.nodes[node]["community"] = cid
+                if node in self.state.graph:
+                    self.state.graph.nodes[node]["community"] = cid
+            sizes: dict[int, int] = {}
+            for cid in partition.values():
+                sizes[cid] = sizes.get(cid, 0) + 1
+            self._refresh_style()
+            self._send_json({
+                "ok": True, "kind": kind, "modularity": modularity,
+                "communities": len(sizes),
+                "largest": sorted(sizes.values(), reverse=True)[:10],
+            })
+            return
+
+        if kind not in analysis.CENTRALITIES:
+            self._send_json({"error": f"unknown compute {kind!r}"}, 400)
+            return
+        values = analysis.centrality(full, kind)
+        for node, value in values.items():
+            full.nodes[node][kind] = value
+            if node in self.state.graph:
+                self.state.graph.nodes[node][kind] = value
+        self._refresh_style()
+        self._send_json({
+            "ok": True, "kind": kind,
+            "top": analysis.top_k(values, int(body.get("topk", 10))),
+            "count": len(values),
+        })
+
+    def _handle_select(self, body: dict) -> None:
+        action = str(body.get("action", "neighbors")).strip().lower()
+        node = str(body.get("node", ""))
+        radius = int(body.get("radius", 1))
+        full = self.state._full_graph
+        if action in ("neighbors", "highlight"):
+            if node not in full:
+                self._send_json({"error": f"{node!r} is not in the graph"}, 400)
+                return
+            subgraph = nx.ego_graph(full, node, radius=radius, undirected=True)
+            neighbors = sorted(n for n in subgraph.nodes if n != node)
+            self._send_json({"node": node, "neighbors": neighbors, "count": len(neighbors)})
+            return
+        self._send_json({"error": f"unknown select {action!r}"}, 400)
 
     def _stream_events(self) -> None:
         self.send_response(200)

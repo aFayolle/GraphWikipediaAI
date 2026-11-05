@@ -61,6 +61,12 @@ def apply_filter(
             [node for node, degree in working.degree() if degree >= min_degree]
         ).copy()
 
+    max_degree = int(filters.get("max_degree") or 0)
+    if max_degree > 0:
+        working = working.subgraph(
+            [node for node, degree in working.degree() if degree <= max_degree]
+        ).copy()
+
     # Outliers set the camera, not the reading: a handful of nodes far from the
     # centroid force the whole view to zoom out until labels are sub-pixel.
     max_pct = filters.get("trim_distance_pct")

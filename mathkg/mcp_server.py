@@ -1,71 +1,92 @@
-"""A minimal MCP server over stdio, wrapping the same core as the HTTP viewer.
+"""A thin MCP server over stdio, proxying tool calls to the warm HTTP viewer.
 
-Deliberately hand-rolled and dependency-free: the protocol surface needed here
-is `initialize`, `tools/list` and `tools/call`, all of which are newline-delimited
-JSON-RPC 2.0. Pulling a framework in to expose eight tools would be more code to
-keep working than the tools themselves.
-
-Everything routes through :class:`~mathkg.server.ViewerState`, so the MCP path
-and the browser path cannot drift apart: a spec patch here is the same spec patch
-there, and `render_png` writes an image an agent can actually look at.
+The viewer (``run.py serve``, port 8765) is the single source of truth: this
+MCP server holds **no** graph of its own. Every tool call is one HTTP request
+to the viewer, which updates its resident ``ViewerState`` and pushes the change
+to the open browser tab over SSE. That is what makes "pilot the graph" fluid:
+an action is a ~100 ms round-trip, never a rebuild.
 
 Usage::
 
-    python -m mathkg.mcp_server          # speaks MCP on stdin/stdout
+    MATHKG_VIEWER_URL=http://127.0.0.1:8765 python -m mathkg.mcp_server
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
+import urllib.error
+import urllib.request
 from typing import Any
-
-import networkx as nx
-
-from . import config, dependency, view_render
-from . import edges as edges_module
-from . import view as view_module
-from .server import ViewerState
 
 log = logging.getLogger(__name__)
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "mathkg", "version": "1.0.0"}
+SERVER_INFO = {"name": "mathkg", "version": "2.0.0"}
+DEFAULT_VIEWER = os.environ.get("MATHKG_VIEWER_URL", "http://127.0.0.1:8765")
 
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "get_state",
-        "description": "Current spec, graph size and a short description of the view.",
+        "description": "Current view: node/edge counts, spec and a readable summary.",
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "set_spec",
         "description": (
-            "Patch the view spec. Keys are dotted paths, values may be expressions over "
-            "node columns (degree, sitelinks, kind, is_anchor) or edge columns (confidence, "
-            "popularity, occurrences, relative_position, in_lead, in_proof). "
-            "Example: {'node.size': '6 + 2.2 * degree'}."
+            "Patch the view spec with dotted key=value strings, e.g. "
+            "['node.size=6 + 2.2 * degree', 'edge.opacity=0.4']. Expressions may "
+            "use node columns (degree, sitelinks, kind, field, betweenness, "
+            "closeness, eigenvector, pagerank, community)."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "set": {"type": "array", "items": {"type": "string"},
-                        "description": "list of key=value patches"},
+                "set": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["set"],
         },
     },
     {
         "name": "filter",
-        "description": "Restrict the graph: min_degree, kinds, largest component only.",
+        "description": "Restrict the graph: min_degree, max_degree, kinds, largest component.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "min_degree": {"type": "integer"},
+                "max_degree": {"type": "integer"},
                 "kinds": {"type": "array", "items": {"type": "string"}},
                 "component": {"type": "string", "enum": ["largest"]},
             },
+        },
+    },
+    {
+        "name": "layout",
+        "description": "Switch the layout: installed, forceatlas2, layered, spring, physics, circular, radial.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"layout": {"type": "string"}},
+            "required": ["layout"],
+        },
+    },
+    {
+        "name": "color_by",
+        "description": (
+            "Colour nodes by a column. mode 'categorical' assigns one colour per "
+            "distinct value; otherwise values are percentile-ranked along the "
+            "palette. Column examples: degree, field, betweenness, pagerank, "
+            "community."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "column": {"type": "string"},
+                "mode": {"type": "string", "enum": ["categorical", "numeric"]},
+                "palette": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["column"],
         },
     },
     {
@@ -82,10 +103,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "path",
-        "description": (
-            "Prerequisite chain between two notions. Reports how it was found: "
-            "directed (a real chain), undirected (direction mixed) or none."
-        ),
+        "description": "Prerequisite chain between two notions (directed or undirected).",
         "inputSchema": {
             "type": "object",
             "properties": {"from": {"type": "string"}, "to": {"type": "string"}},
@@ -94,7 +112,7 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "describe",
-        "description": "Counts, immediate prerequisites and enables, longest chain through a notion.",
+        "description": "Counts, immediate prerequisites/enables, longest chain through a notion.",
         "inputSchema": {
             "type": "object",
             "properties": {"node": {"type": "string"}},
@@ -102,8 +120,48 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "reset",
+        "description": "Restore the full graph after an ego narrowing.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "centrality",
+        "description": (
+            "Compute a centrality per node and expose it as a column (usable by "
+            "set_spec/color_by). kind: betweenness, closeness, eigenvector, pagerank."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["betweenness", "closeness", "eigenvector", "pagerank"]},
+                "topk": {"type": "integer", "default": 10},
+            },
+            "required": ["kind"],
+        },
+    },
+    {
+        "name": "community",
+        "description": "Detect communities (Louvain) and expose them as the 'community' column.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"resolution": {"type": "number", "default": 1.0}},
+        },
+    },
+    {
+        "name": "select",
+        "description": "List the neighbours of a notion within a radius (highlight support).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "node": {"type": "string"},
+                "radius": {"type": "integer", "default": 1},
+            },
+            "required": ["node"],
+        },
+    },
+    {
         "name": "render_png",
-        "description": "Render the current graph and spec to a PNG file, and return its path.",
+        "description": "Render the current graph and spec to a PNG, and return its path.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -114,124 +172,147 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "reload_graph",
-        "description": "Rebuild the graph from edges.csv (after re-running the edges stage).",
+        "description": "Rebuild the graph from the data files (after re-running the edges stage).",
         "inputSchema": {"type": "object", "properties": {}},
     },
 ]
 
 
-class MathKGServer:
-    """Holds the graph and spec, and answers tool calls."""
+def _post(base: str, path: str, payload: dict) -> dict:
+    request = urllib.request.Request(
+        f"{base}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read())
+        except Exception:
+            return {"error": f"HTTP {exc.code}"}
+    except urllib.error.URLError as exc:
+        return {"error": f"viewer not reachable ({exc.reason}). Start it with `run.py serve`."}
 
-    def __init__(self, graph: nx.Graph | None = None, spec: dict | None = None):
-        self.spec = spec or view_module.load_spec()
-        self.graph = graph if graph is not None else self._build_graph()
-        mentions_path = config.RAW_DIR / "mentions.csv"
-        self.mentions = (
-            __import__("pandas").read_csv(mentions_path) if mentions_path.exists() else None
-        )
-        self.state = ViewerState(self.graph, self.spec, self.mentions)
 
-    @staticmethod
-    def _build_graph() -> nx.DiGraph:
-        frame = dependency.load_edges()
-        _, titles = edges_module.load_summaries()
-        graph = dependency.build_dag(frame, titles=set(titles))
-        graph, _ = dependency.break_cycles(graph)
-        return dependency.enrich_with_attributes(graph)
+def _get(base: str, path: str) -> dict:
+    try:
+        with urllib.request.urlopen(f"{base}{path}", timeout=10) as response:
+            return json.loads(response.read())
+    except urllib.error.URLError as exc:
+        return {"error": f"viewer not reachable ({exc.reason}). Start it with `run.py serve`."}
+
+
+class MathKGClient:
+    """A proxy: one method per MCP tool, each one HTTP call to the viewer."""
+
+    def __init__(self, base_url: str = DEFAULT_VIEWER, post=None, get=None):
+        self.base = base_url.rstrip("/")
+        self._post = post or _post
+        self._get = get or _get
 
     # -- tools --------------------------------------------------------------- #
 
     def get_state(self, **_kwargs) -> dict:
+        spec = self._get(self.base, "/state")
+        health = self._get(self.base, "/health")
         return {
-            "nodes": self.state.graph.number_of_nodes(),
-            "edges": self.state.graph.number_of_edges(),
-            "spec": self.state.spec,
-            "detail": self.state.detail(),
+            "version": spec.get("version"),
+            "spec": spec.get("spec"),
+            "nodes": health.get("nodes"),
+            "edges": health.get("edges"),
         }
 
     def set_spec(self, set: list[str] | None = None, **_kwargs) -> dict:  # noqa: A002
-        message = self.state.patch_spec(set or [])
-        return {"version": message["version"], "detail": message["detail"]}
+        return self._post(self.base, "/spec", {"set": set or []})
 
-    def filter(self, min_degree: int = 0, kinds: list[str] | None = None,
-               component: str | None = None, **_kwargs) -> dict:
+    def filter(self, min_degree: int = 0, max_degree: int = 0,
+               kinds: list[str] | None = None, component: str | None = None,
+               **_kwargs) -> dict:
         patch = []
         if min_degree:
             patch.append(f"filter.min_degree={min_degree}")
+        if max_degree:
+            patch.append(f"filter.max_degree={max_degree}")
         if kinds:
             patch.append(f"filter.kinds={json.dumps(kinds)}")
         if component:
             patch.append(f"filter.component={component}")
-        if patch:
-            self.state.patch_spec(patch)
-        return {"nodes": self.state.graph.number_of_nodes(), "filter": self.state.spec["filter"]}
+        if not patch:
+            return {"error": "no filter argument given"}
+        return self._post(self.base, "/spec", {"set": patch})
+
+    def layout(self, layout: str, **_kwargs) -> dict:
+        return self._post(self.base, "/spec", {"set": [f"layout={layout}"]})
+
+    def color_by(self, column: str, mode: str = "numeric",
+                 palette: list[str] | None = None, **_kwargs) -> dict:
+        patch = [f"node.color_by.column={column}"]
+        if mode:
+            patch.append(f"node.color_by.mode={mode}")
+        if palette:
+            patch.append(f"node.color_by.palette={json.dumps(palette)}")
+        return self._post(self.base, "/spec", {"set": patch})
 
     def ego(self, node: str, radius: int = 2, **_kwargs) -> dict:
-        if node not in self.state.graph:
-            return {"error": f"{node!r} is not in the graph"}
-        subgraph = nx.ego_graph(self.state.graph, node, radius=radius, undirected=True)
-        self.state.replace_graph(subgraph.copy())
-        distances = nx.single_source_shortest_path_length(
-            self.state.graph.to_undirected(), node
-        )
-        by_hop: dict[int, int] = {}
-        for distance in distances.values():
-            by_hop[distance] = by_hop.get(distance, 0) + 1
-        return {"node": node, "hops": by_hop, "nodes": self.state.graph.number_of_nodes()}
+        return self._post(self.base, "/query", {"kind": "ego", "node": node, "radius": radius})
 
     def path(self, source: str | None = None, target: str | None = None,
              **kwargs: Any) -> dict:
-        source = source or kwargs.get("from")
-        target = target or kwargs.get("to")
-        chain, how = dependency.path_between(self.state.graph, source or "", target or "")
-        return {"chain": chain, "how": how, "steps": len(chain) if chain else 0}
+        source = source or kwargs.get("from") or ""
+        target = target or kwargs.get("to") or ""
+        return self._post(self.base, "/query", {"kind": "path", "from": source, "to": target})
 
     def describe(self, node: str, **_kwargs) -> dict:
-        return dependency.describe(self.state.graph, node)
+        return self._post(self.base, "/query", {"kind": "describe", "node": node})
+
+    def reset(self, **_kwargs) -> dict:
+        return self._post(self.base, "/query", {"kind": "reset"})
+
+    def centrality(self, kind: str = "betweenness", topk: int = 10, **_kwargs) -> dict:
+        return self._post(self.base, "/compute", {"kind": kind, "topk": topk})
+
+    def community(self, resolution: float = 1.0, **_kwargs) -> dict:
+        return self._post(self.base, "/compute", {"kind": "communities", "resolution": resolution})
+
+    def select(self, node: str, radius: int = 1, **_kwargs) -> dict:
+        return self._post(self.base, "/select", {"action": "neighbors", "node": node, "radius": radius})
 
     def render_png(self, name: str = "mcp_render", figsize: float = 16.0, **_kwargs) -> dict:
-        out = config.ARTIFACT_DIR / "mcp" / f"{name}.png"
-        view_module.validate_spec(self.state.spec)
-        view_render.render_spec(
-            self.state.graph,
-            self.state.spec,
-            out,
-            mentions=self.mentions,
-            figsize=(float(figsize), float(figsize) * 0.7),
-        )
-        return {"path": str(out), "bytes": out.stat().st_size}
+        return self._post(self.base, "/render_png", {"name": name, "figsize": figsize})
 
     def reload_graph(self, **_kwargs) -> dict:
-        self.state.replace_graph(self._build_graph())
-        return {"nodes": self.state.graph.number_of_nodes(),
-                "edges": self.state.graph.number_of_edges()}
+        return self._post(self.base, "/reload", {})
 
     def call(self, name: str, arguments: dict) -> dict:
         handler = {
             "get_state": self.get_state,
             "set_spec": self.set_spec,
             "filter": self.filter,
+            "layout": self.layout,
+            "color_by": self.color_by,
             "ego": self.ego,
             "path": self.path,
             "describe": self.describe,
+            "reset": self.reset,
+            "centrality": self.centrality,
+            "community": self.community,
+            "select": self.select,
             "render_png": self.render_png,
             "reload_graph": self.reload_graph,
         }.get(name)
         if handler is None:
             raise ValueError(f"unknown tool {name!r}")
-        try:
-            return handler(**arguments)
-        except view_module.ExpressionError as exc:
-            raise ValueError(str(exc)) from exc
+        return handler(**arguments)
 
 
 # --------------------------------------------------------------------------- #
-# JSON-RPC plumbing
+# JSON-RPC plumbing (unchanged)
 # --------------------------------------------------------------------------- #
 
-def handle(server: MathKGServer, request: dict) -> dict | None:
-    """One JSON-RPC message in, one response out (or None for notifications)."""
+def handle(client: MathKGClient, request: dict) -> dict | None:
     method = request.get("method")
     request_id = request.get("id")
 
@@ -246,39 +327,28 @@ def handle(server: MathKGServer, request: dict) -> dict | None:
 
     try:
         if method == "initialize":
-            return reply(
-                {
-                    "protocolVersion": PROTOCOL_VERSION,
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": SERVER_INFO,
-                }
-            )
+            return reply({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": SERVER_INFO,
+            })
         if method == "tools/list":
             return reply({"tools": TOOLS})
         if method == "tools/call":
             params = request.get("params") or {}
             name = params.get("name", "")
             arguments = params.get("arguments") or {}
-            result = server.call(name, arguments)
-            return reply(
-                {
-                    "content": [{"type": "text", "text": json.dumps(result)}],
-                    "isError": False,
-                }
-            )
+            result = client.call(name, arguments)
+            return reply({"content": [{"type": "text", "text": json.dumps(result)}], "isError": False})
         return error(-32601, f"unknown method {method!r}")
-    except Exception as exc:  # surfaced to the client, never swallowed
+    except Exception as exc:
         return error(-32603, str(exc))
 
 
 def main() -> int:
     logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
-    server = MathKGServer()
-    log.warning(
-        "mathkg MCP ready: %d nodes, %d edges",
-        server.state.graph.number_of_nodes(),
-        server.state.graph.number_of_edges(),
-    )
+    client = MathKGClient()
+    log.warning("mathkg MCP (thin client) -> %s", client.base)
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -291,7 +361,7 @@ def main() -> int:
             ) + "\n")
             sys.stdout.flush()
             continue
-        response = handle(server, request)
+        response = handle(client, request)
         if response is not None:
             sys.stdout.write(json.dumps(response) + "\n")
             sys.stdout.flush()
