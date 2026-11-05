@@ -2,12 +2,12 @@ name: "02 — degree colouring"
 source: dependency
 layout: installed
 title: "02 — colour and size ∝ degree"
-subtitle: "colour = degree quantiles   ·   size = 5 + 9·√degree   ·   label size ∝ √degree"
+subtitle: "colour = degree, monotonic luminance   ·   size = 5 + 9·√degree   ·   label size ∝ √degree"
 node:
   size: "9 + 11 * sqrt(degree)"
   color_by:
     column: degree
-    palette: ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51"]
+    palette: ["#414487", "#2a788e", "#22a884", "#7ad151", "#c8e020", "#fde725"]
 label:
   count: 9999
   size: 9

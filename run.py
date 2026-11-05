@@ -25,32 +25,35 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import networkx as nx
-import pandas as pd
-
-from mathkg import (
-    color,
-    config,
-    curriculum,
-    dependency,
-    edges,
-    export,
-    fetch,
-    graph,
-    render,
-    render_focus,
-    scope,
-    view_render,
-    wikidata,
-)
-from mathkg import (
-    server as server_module,
-)
-from mathkg import (
-    view as view_module,
-)
+# Heavy imports (networkx, pandas, matplotlib via render) are deferred so the
+# latency-sensitive stages ``query`` and ``set`` start in tens of milliseconds
+# instead of ~1 s. ``config`` is light (os + pathlib) and stays at module scope.
+from mathkg import config
 
 log = logging.getLogger("run")
+
+nx = pd = None
+color = curriculum = dependency = edges = export = fetch = graph = render = None
+render_focus = scope = view_render = wikidata = None
+server_module = view_module = None
+
+
+def _load_heavy() -> None:
+    """Import the heavy stack once, only when a stage actually needs it."""
+    global nx, pd
+    global color, curriculum, dependency, edges, export, fetch, graph, render
+    global render_focus, scope, view_render, wikidata
+    global server_module, view_module
+    if nx is not None:
+        return
+    import networkx as nx
+    import pandas as pd
+    from mathkg import (
+        color, curriculum, dependency, edges, export, fetch, graph,
+        render, render_focus, scope, view_render, wikidata,
+    )
+    from mathkg import server as server_module
+    from mathkg import view as view_module
 
 
 # --------------------------------------------------------------------------- #
@@ -294,6 +297,64 @@ def stage_set(args: argparse.Namespace) -> None:
     log.info("pushed: %s", reply)
 
 
+def stage_query(args: argparse.Namespace) -> None:
+    """Instant query against a warm viewer (the graph is already in memory).
+
+    ``describe``/``ego``/``path`` here are the same queries as their cold
+    counterparts below, but they hit the running server instead of rebuilding
+    the DAG from CSV on every call -- ~13 ms instead of ~1.2 s. ``ego`` also
+    swaps the open browser tab to the ego subgraph, so "show me this node" is
+    immediate rather than a re-render.
+    """
+    kind = str(args.kind).strip().lower()
+    if kind not in ("describe", "ego", "path"):
+        sys.exit("query --kind must be describe, ego or path")
+
+    body: dict = {"kind": kind}
+    if kind in ("describe", "ego"):
+        if not args.node:
+            sys.exit(f"{kind} needs --node")
+        body["node"] = args.node
+        if kind == "ego":
+            body["radius"] = args.radius
+    elif kind == "path":
+        if not args.source or not args.target:
+            sys.exit("path needs --from and --to")
+        body["from"] = args.source
+        body["to"] = args.target
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{args.port}/query",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            reply = json.loads(response.read())
+    except urllib.error.URLError as exc:
+        sys.exit(f"no viewer on port {args.port} ({exc}). Start one with `run.py serve`.")
+
+    if reply.get("error"):
+        sys.exit(reply["error"])
+
+    if kind == "describe":
+        if not reply.get("present", True):
+            sys.exit(f"{reply.get('node')!r} is not in the graph")
+        log.info("%s: %d prerequisites, %d enabled (%d in / %d out)",
+                 reply.get("node"), reply.get("prerequisites"), reply.get("enables"),
+                 reply.get("in_degree"), reply.get("out_degree"))
+        log.info("needs directly: %s", ", ".join(reply.get("immediate_prerequisites") or []) or "nothing")
+        log.info("enables directly: %s", ", ".join(reply.get("immediate_enables") or []) or "nothing")
+    elif kind == "ego":
+        hops = reply.get("hops") or {}
+        for distance in sorted(hops, key=int):
+            log.info("%s hop(s): %d nodes", distance, hops[distance])
+    elif kind == "path":
+        log.info("%s path (%d steps): %s", reply.get("how"), reply.get("steps"),
+                 " -> ".join(reply.get("chain") or []) or "none")
+
+
 def _dag() -> nx.DiGraph:
     edges_frame = dependency.load_edges()
     _, titles = edges.load_summaries()
@@ -520,12 +581,15 @@ STAGES = {
     "gephi-layout": (stage_gephi_layout, "run Gephi's own ForceAtlas2 headlessly"),
     "serve": (stage_serve, "start the live view server"),
     "set": (stage_set, "push a spec patch to the running viewer"),
+    "query": (stage_query, "instant query against a warm viewer (no rebuild)"),
     "all": (stage_all, "wikidata -> fetch -> build"),
     "all-offline": (stage_all_offline, "import-legacy -> build (no network)"),
     "curriculum": (stage_curriculum, "the hand-written prerequisite DAG"),
 }
 
 NETWORK_STAGES = {"wikidata", "fetch", "all"}
+#: Stages that talk to an already-warm viewer and must not pay the import cost.
+LIGHT_STAGES = {"query", "set"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -570,6 +634,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--to", dest="target", default="", help="path: target notion")
     parser.add_argument("--focus", default="", help="dependency stage: render this notion's ego view")
     parser.add_argument("--radius", type=int, default=2, help="dependency stage: ego radius")
+    parser.add_argument("--kind", default="describe",
+                        help="query stage: describe | ego | path")
     parser.add_argument("--min-confidence", type=float, default=0.0,
                         help="dependency stage: drop edges below this confidence")
     parser.add_argument(
@@ -613,7 +679,7 @@ GLOBAL_FLAGS = {
 GLOBAL_VALUED = {
     "--set", "--spec", "--out", "--port", "--focus", "--radius", "--min-confidence",
     "--labels", "--view", "--max-degree", "--legacy-csv",
-    "--node", "--from", "--to", "--gexf", "--iterations",
+    "--node", "--from", "--to", "--gexf", "--iterations", "--kind",
 }
 
 
@@ -649,6 +715,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(normalise_argv(list(raw)))
     setup_logging(args.verbose)
     config.ensure_dirs()
+
+    if args.stage not in LIGHT_STAGES:
+        _load_heavy()
 
     if args.stage in NETWORK_STAGES and not config.contact_is_set():
         log.warning(

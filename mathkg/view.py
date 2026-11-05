@@ -416,8 +416,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
 # Colour by rule
 # --------------------------------------------------------------------------- #
 
-DEFAULT_PALETTE = ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51",
-                   "#6a4c93", "#1982c4", "#8ac926"]
+DEFAULT_PALETTE = ["#414487", "#2a788e", "#22a884", "#7ad151", "#c8e020", "#fde725"]
 
 
 def node_colors(
@@ -444,20 +443,45 @@ def node_colors(
     bins = rule.get("bins")
     if bins:
         edges_list = sorted({float(b) for b in bins})
-    else:
-        ordered = sorted(values.values())
-        count = max(1, len(palette) - 1)
-        edges_list = [
-            ordered[min(len(ordered) - 1, int(len(ordered) * (i + 1) / count))]
-            for i in range(count - 1)
-        ]
-        edges_list = sorted(set(edges_list))
 
-    def colour_for(value: float) -> str:
-        index = 0
-        for edge_value in edges_list:
-            if value > edge_value:
-                index += 1
-        return palette[min(index, len(palette) - 1)]
+        def colour_for(value: float) -> str:
+            index = 0
+            for edge_value in edges_list:
+                if value > edge_value:
+                    index += 1
+            return palette[min(index, len(palette) - 1)]
 
-    return {node: colour_for(value) for node, value in values.items()}
+        return {node: colour_for(value) for node, value in values.items()}
+
+    # Percentile rank with ties sharing a rank, then a *continuous* walk along the
+    # palette. The previous version quantile-binned and then did
+    # `sorted(set(...))`: duplicate quantile edges collapsed, so the list of
+    # thresholds was shorter than the palette and its brightest end was never
+    # reached. On a graph where hundreds of nodes share degree 3, most of the
+    # ramp went unused and hubs never got the top colour.
+    buckets: dict[float, list[str]] = {}
+    for node, value in values.items():
+        buckets.setdefault(value, []).append(node)
+
+    total = max(1, len(values) - 1)
+    rank: dict[float, float] = {}
+    seen = 0
+    for value in sorted(buckets):
+        group = len(buckets[value])
+        rank[value] = (seen + (group - 1) / 2.0) / total
+        seen += group
+
+    def blend(start_hex: str, end_hex: str, weight: float) -> str:
+        low = tuple(int(start_hex[i:i + 2], 16) for i in (1, 3, 5))
+        high = tuple(int(end_hex[i:i + 2], 16) for i in (1, 3, 5))
+        mixed = tuple(round(a + (b - a) * weight) for a, b in zip(low, high))
+        return "#{:02x}{:02x}{:02x}".format(*mixed)
+
+    def colour_for_rank(value: float) -> str:
+        if len(palette) == 1:
+            return palette[0]
+        position = rank[value] * (len(palette) - 1)
+        index = min(int(position), len(palette) - 2)
+        return blend(palette[index], palette[index + 1], position - index)
+
+    return {node: colour_for_rank(value) for node, value in values.items()}

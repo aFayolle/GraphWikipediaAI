@@ -53,6 +53,7 @@ class ViewerState:
 
     def __init__(self, graph: nx.Graph, spec: dict, mentions: pd.DataFrame | None = None):
         self.source_graph = graph      # everything
+        self._full_graph = graph       # never narrowed: queries answer against this
         self.graph = graph             # what the spec currently shows
         self.spec = spec
         self.mentions = mentions
@@ -516,34 +517,43 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _handle_query(self, body: dict) -> None:
-        """ego / path / describe. ego and path also swap the displayed graph."""
+        """ego / path / describe / reset, answered against the *full* graph.
+
+        ``ego`` narrows the *displayed* graph, but the full graph is kept, so a
+        later ``describe``/``path`` still works and ``reset`` restores the view.
+        """
         from . import dependency
 
+        full = self.state._full_graph
         kind = str(body.get("kind", "")).strip().lower()
         if kind == "describe":
             node = str(body.get("node", ""))
-            self._send_json(dependency.describe(self.state.graph, node))
+            self._send_json(dependency.describe(full, node))
+            return
+        if kind == "reset":
+            self.state.replace_graph(full.copy())
+            self._send_json({"kind": "reset", "nodes": full.number_of_nodes()})
             return
         if kind == "ego":
             node = str(body.get("node", ""))
             radius = int(body.get("radius", 2))
-            if node not in self.state.graph:
+            if node not in full:
                 self._send_json({"error": f"{node!r} is not in the graph"}, 400)
                 return
-            subgraph = nx.ego_graph(self.state.graph, node, radius=radius, undirected=True)
-            self.state.replace_graph(subgraph.copy())
+            subgraph = nx.ego_graph(full, node, radius=radius, undirected=True)
             distances = nx.single_source_shortest_path_length(
-                self.state.graph.to_undirected(), node
+                full.to_undirected(), node, cutoff=radius
             )
             by_hop: dict[int, int] = {}
             for distance in distances.values():
                 by_hop[distance] = by_hop.get(distance, 0) + 1
+            self.state.replace_graph(subgraph.copy())
             self._send_json({"kind": "ego", "node": node, "hops": by_hop})
             return
         if kind == "path":
             source = str(body.get("from", ""))
             target = str(body.get("to", ""))
-            chain, how = dependency.path_between(self.state.graph, source, target)
+            chain, how = dependency.path_between(full, source, target)
             if chain is None:
                 self._send_json(
                     {"kind": "path", "chain": None, "how": "none",
