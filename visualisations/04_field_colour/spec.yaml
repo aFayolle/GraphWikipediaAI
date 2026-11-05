@@ -1,0 +1,19 @@
+name: "04 — field colouring"
+source: dependency
+layout: installed
+title: "04 — colour by mathematical field"
+subtitle: "colour = LLM-classified field   ·   size ∝ degree   ·   legend + hover name the field"
+node:
+  size: "9 + 11 * sqrt(degree)"
+  color_by:
+    column: field
+    mode: categorical
+    palette: ["#c24d5d", "#c0571e", "#ac6900", "#897d00", "#508d23", "#009563", "#009496", "#008abc", "#337bd0", "#736ace", "#9b5bb6", "#b6508e"]
+label:
+  count: 9999
+  size: 9
+edge:
+  width: "0.25"
+  opacity: 0.12
+edge_weight:
+  formula: confidence

@@ -322,6 +322,7 @@ def node_rows(graph: nx.Graph) -> dict[str, dict[str, Any]]:
             "sitelinks": float(data.get("sitelinks", 0) or 0),
             "kind": str(data.get("kind", "")) or "unknown",
             "is_anchor": bool(data.get("anchor", False)),
+            "field": str(data.get("field", "")) or "unknown",
         }
         for node, data in graph.nodes(data=True)
     }
@@ -375,7 +376,7 @@ def edge_rows(graph: nx.Graph, mentions: pd.DataFrame | None) -> dict[tuple[str,
 
 
 #: Columns an expression may reference, by context.
-NODE_COLUMNS = {"degree", "sitelinks", "kind", "is_anchor"}
+NODE_COLUMNS = {"degree", "sitelinks", "kind", "is_anchor", "field"}
 EDGE_COLUMNS = {
     "confidence", "popularity", "occurrences", "relative_position", "in_lead", "in_proof",
 }
@@ -422,12 +423,12 @@ DEFAULT_PALETTE = ["#414487", "#2a788e", "#22a884", "#7ad151", "#c8e020", "#fde7
 def node_colors(
     graph, spec: dict, columns: dict[str, dict[str, Any]]
 ) -> dict[str, str]:
-    """Assign a colour per node: either one literal, or a binned rule.
+    """Assign a colour per node: a literal, a binned rule, or categorical.
 
-    ``node.color_by`` takes a column and a palette; values are split into equal
-    quantile bins so the colouring is robust to the heavy tails these graphs have
-    (degree 1 dominates, one node has degree 35). Explicit ``bins`` may be given
-    instead of quantiles.
+    ``node.color_by`` takes a column and a palette. Numeric columns are split
+    into percentile ranks (robust to the heavy tails these graphs have); add
+    ``mode: categorical`` to hand one palette slot per distinct value (a math
+    field, a kind, ...).
     """
     node_spec = spec.get("node") or {}
     literal = node_spec.get("color", "#4E79A7")
@@ -438,6 +439,21 @@ def node_colors(
 
     column = rule.get("column", "degree")
     palette = rule.get("palette") or DEFAULT_PALETTE
+
+    if rule.get("mode") == "categorical":
+        # One colour per distinct value. Values are sorted so the legend and the
+        # colour assignment stay stable across runs. 12 hues cannot be told apart
+        # colour-blind-safely, so the viewer's legend + hover carry the name.
+        ordered = sorted({str(columns.get(node, {}).get(column, "") or "unknown")
+                          for node in graph.nodes})
+        colour_by_value = {value: palette[i % len(palette)]
+                           for i, value in enumerate(ordered)}
+        return {
+            node: colour_by_value.get(
+                str(columns.get(node, {}).get(column, "") or "unknown"), literal)
+            for node in graph.nodes
+        }
+
     values = {node: float(columns.get(node, {}).get(column, 0) or 0) for node in graph.nodes}
 
     bins = rule.get("bins")

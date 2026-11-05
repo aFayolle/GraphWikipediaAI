@@ -238,6 +238,23 @@ class ViewerState:
     def _font_size(self) -> float:
         return float(self.spec.get("label", {}).get("size", 7.0)) * 1.3
 
+    def _legend(self, colours: dict[str, str]) -> list[dict[str, Any]]:
+        """field -> colour -> count, for the categorical colour legend."""
+        rule = (self.spec.get("node") or {}).get("color_by") or {}
+        if rule.get("mode") != "categorical":
+            return []
+        column = rule.get("column", "field")
+        colour_by_field: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        for node in self.graph.nodes:
+            value = str(self._node_columns.get(node, {}).get(column, "") or "unknown")
+            colour_by_field.setdefault(value, colours.get(node, "#4E79A7"))
+            counts[value] = counts.get(value, 0) + 1
+        return [
+            {"name": name, "color": colour_by_field[name], "count": counts[name]}
+            for name in sorted(counts)
+        ]
+
     def style_payload(self, sent: float | None = None) -> dict[str, Any]:
         """Node/edge styling only -- cheap enough to send on every change."""
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
@@ -258,6 +275,7 @@ class ViewerState:
             "sent": sent or time.time() * 1000,
             "spec": self.spec,
             "detail": self.detail(),
+            "legend": self._legend(colours),
             "nodes": [
                 {"id": node, "size": self._size_for(node), "color": colours.get(node, "#4E79A7"),
                  "font_size": self._font_for(node),
@@ -294,7 +312,7 @@ class ViewerState:
                     "id": node,
                     "label": (str(data.get("label", node))[:48]
                               if node in labelled else ""),
-                    "title": f"{node} — degree {self.graph.degree(node)}, sitelinks {int(data.get('sitelinks', 0))}",
+                    "title": f"{node} — {data.get('field', '')} · degree {self.graph.degree(node)}, sitelinks {int(data.get('sitelinks', 0))}",
                     "x": x,
                     "y": y,
                     "size": self._size_for(node),
@@ -318,6 +336,7 @@ class ViewerState:
             "version": self.structure_version,
             "spec": self.spec,
             "detail": self.detail(),
+            "legend": self._legend(colours),
             "physics": not self._positions,
             "nodes": nodes,
             "edges": edges,

@@ -243,7 +243,25 @@ def _graph_for_spec(spec: dict) -> nx.Graph:
     # break_cycles belongs here too. Without it, `run.py view` computed a
     # different fingerprint and silently ignored an installed layout.
     dag = dependency.break_cycles(_dag())[0]
-    return dependency.enrich_with_attributes(dag)
+    dag = dependency.enrich_with_attributes(dag)
+    return _attach_field(dag)
+
+
+def _attach_field(dag: nx.DiGraph) -> nx.DiGraph:
+    """Attach the LLM-classified math field to each node (reports/llm_fields.csv).
+
+    ``node.color_by: {column: field, mode: categorical}`` colours by this value.
+    Titles absent from the CSV fall back to ``unknown``, which the categorical
+    colourer maps to its own slot rather than crashing.
+    """
+    field_csv = config.PROJECT_ROOT / "reports" / "llm_fields.csv"
+    if not field_csv.exists():
+        return dag
+    frame = pd.read_csv(field_csv, dtype=str, keep_default_na=False)
+    field = dict(zip(frame["title"], frame["llm_field"], strict=False))
+    for node in dag.nodes:
+        dag.nodes[node]["field"] = field.get(node, "") or "unknown"
+    return dag
 
 
 def stage_view(args: argparse.Namespace) -> None:
