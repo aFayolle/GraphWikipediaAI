@@ -45,6 +45,17 @@
     position: absolute; bottom: 12px; left: 16px; z-index: 5;
     font-size: 11px; color: #7f93b0; letter-spacing: .3px;
   }
+  #legend {
+    position: absolute; top: 14px; right: 16px; z-index: 5;
+    background: rgba(8,14,26,.72); border: 1px solid rgba(120,170,255,.14);
+    padding: 10px 13px; border-radius: 10px; font-size: 11px; line-height: 1.7;
+    color: #cfe0ff; max-height: 62vh; overflow: auto;
+    backdrop-filter: blur(6px);
+  }
+  .lg-row { display: flex; align-items: center; gap: 7px; }
+  .lg-swatch { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+  .lg-name { flex: 1 1 auto; }
+  .lg-count { color: #8ea6c8; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -57,6 +68,7 @@
 </div>
 <div id="status">connecting…</div>
 <button id="reheat" title="re-run the physics">reheat</button>
+<div id="legend" style="display:none"></div>
 <style>
   #reheat { position: absolute; right: 16px; bottom: 14px; z-index: 5;
     background: rgba(16,35,58,.9); color: #dbe7f8; border: 1px solid rgba(120,170,255,.28);
@@ -96,13 +108,16 @@ function initNetwork(usePhysics) {
     physics: {
       enabled: true,
       solver: "forceAtlas2Based",
-      stabilization: { enabled: true, iterations: 150, updateInterval: 25 },
+      stabilization: { enabled: true, iterations: 150, updateInterval: 25, fit: true },
       forceAtlas2Based: {
         // Weak springs (0.02) meant dragging a hub moved one neighbour: the
         // forces were far too slack to propagate. These values make the pull
-        // visible without the layout exploding.
-        gravitationalConstant: -120, centralGravity: 0.005,
-        springLength: 150, springStrength: 0.12, damping: 0.35
+        // visible without the layout exploding. avoidOverlap + a real central
+        // pull keep the layout bounded so the simulation can stay ON after load
+        // instead of inflating to sub-pixel.
+        gravitationalConstant: -120, centralGravity: 0.05,
+        springLength: 150, springStrength: 0.12, damping: 0.35,
+        avoidOverlap: 0.5
       }
     },
     interaction: { hover: true, tooltipDelay: 140, hideEdgesOnDrag: false },
@@ -136,13 +151,9 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
-    // Freeze once the drag ends: the node stays where it was dropped instead of
-    // being pulled 72% of the way back, and it can be grabbed again immediately.
-    // (A `fixed` pin achieved the same thing but made re-dragging impossible.)
-    if (network) {
-      network.stopSimulation();
-      network.setOptions({ physics: { enabled: false } });
-    }
+    // Physics stays on: the dropped node settles back into the force field
+    // instead of freezing in place. Keep the drag's base position so the
+    // breathing motion (when on) starts from where the node was dropped.
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -237,6 +248,17 @@ function stopMotion() {
 
 function setStatus(text) { document.getElementById("status").textContent = text; }
 
+function renderLegend(legend) {
+  const el = document.getElementById("legend");
+  if (!legend || !legend.length) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.innerHTML = legend.map(row =>
+    `<div class="lg-row"><span class="lg-swatch" style="background:${row.color}"></span>` +
+    `<span class="lg-name">${row.name}</span>` +
+    `<span class="lg-count">${row.count}</span></div>`
+  ).join("");
+}
+
 function setHud(spec, nodeCount, edgeCount, detail) {
   document.getElementById("spec-name").textContent = spec.name || "view";
   document.getElementById("counts").textContent = `${nodeCount} nodes · ${edgeCount} edges`;
@@ -273,20 +295,15 @@ async function loadGraph() {
   setTimeout(() => {
     // Fit everything: the whole graph must be visible in one glance.
     fitCore({ duration: 600 });
-    // Let physics settle, then FREEZE. Left running it keeps expanding the
-    // layout, and after a few seconds the whole graph is sub-pixel. Interaction
-    // (drag, reheat) wakes it again.
-    if (network) {
-      // Physics only on interaction. Running it at load inflated the layout from
-      // +-770 to +-3300 in 2.5 s, which shrank every node and label to a third.
-      network.stopSimulation();
-      network.setOptions({ physics: { enabled: false } });
-    }
-    if (STATIC) { setStatus("static view — add nothing to the URL for motion"); }
+    // Physics stays ON: the simulation keeps the layout alive and reacts to
+    // every drag. avoidOverlap + centralGravity (above) bound it so it settles
+    // instead of inflating away.
+    if (STATIC) { setStatus("physics live — add ?motion for breathing drift"); }
     else { startMotion(base); }
   }, 1200);
 
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
+  renderLegend(payload.legend);
   setStatus(`loaded in ${Date.now() - started} ms · structure v${payload.version}`);
 }
 
@@ -304,6 +321,7 @@ function applyStyle(payload) {
     edges.update(payload.edges.map(e => ({ id: e.id, width: e.width })));
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
+  renderLegend(payload.legend);
   setStatus(`style applied in ${Date.now() - payload.sent} ms · spec v${payload.version}`);
 }
 
