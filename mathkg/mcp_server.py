@@ -166,6 +166,14 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "highlight",
+        "description": "Highlight one field (dim every other node); call without a field to clear.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"field": {"type": "string"}},
+        },
+    },
+    {
         "name": "render_png",
         "description": "Render the current graph and spec to a PNG, and return its path.",
         "inputSchema": {
@@ -288,6 +296,11 @@ class MathKGClient:
     def select(self, node: str, radius: int = 1, **_kwargs) -> dict:
         return self._post(self.base, "/select", {"action": "neighbors", "node": node, "radius": radius})
 
+    def highlight(self, field: str | None = None, **_kwargs) -> dict:
+        if field:
+            return self._post(self.base, "/spec", {"set": [f"highlight.field={field}"]})
+        return self._post(self.base, "/spec", {"set": ["highlight.field=null"]})
+
     def render_png(self, name: str = "mcp_render", figsize: float = 16.0, **_kwargs) -> dict:
         return self._post(self.base, "/render_png", {"name": name, "figsize": figsize})
 
@@ -308,6 +321,7 @@ class MathKGClient:
             "centrality": self.centrality,
             "community": self.community,
             "select": self.select,
+            "highlight": self.highlight,
             "render_png": self.render_png,
             "reload_graph": self.reload_graph,
         }.get(name)

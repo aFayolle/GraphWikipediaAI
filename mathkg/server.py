@@ -228,6 +228,16 @@ class ViewerState:
 
     # -- derived attributes -------------------------------------------------- #
 
+    def _highlight_field(self) -> str | None:
+        value = (self.spec.get("highlight") or {}).get("field")
+        return str(value) if value else None
+
+    def _is_highlighted(self, node: str) -> bool:
+        field = self._highlight_field()
+        if not field:
+            return True  # no highlight -> everything is "highlighted"
+        return str(self._node_columns.get(node, {}).get("field", "")) == field
+
     def _size_for(self, node: str) -> float:
         expression = self.spec.get("node", {}).get("size", 8)
         try:
@@ -238,7 +248,10 @@ class ViewerState:
         # No sqrt here: the expression already yields a radius. Applying a second
         # sqrt turned "9 + 11*sqrt(degree)" into sqrt(9 + 11*sqrt(degree)), so a
         # degree-40 hub rendered at ~6 px instead of ~78 px.
-        return max(2.0, float(value))
+        size = max(2.0, float(value))
+        if not self._is_highlighted(node):
+            size *= 0.45
+        return size
 
     def _font_colour(self, node: str) -> str:
         """Dim label for leaves, near-white for hubs: a second visual channel."""
@@ -286,6 +299,10 @@ class ViewerState:
     def style_payload(self, sent: float | None = None) -> dict[str, Any]:
         """Node/edge styling only -- cheap enough to send on every change."""
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
+        if self._highlight_field():
+            for node in self.graph.nodes:
+                if not self._is_highlighted(node):
+                    colours[node] = "#33415c"
         labelled = self._labelled()
         edges = [
             {"id": f"{source}\u0000{target}", "width": self._edge_width(source, target),
@@ -347,6 +364,10 @@ class ViewerState:
 
     def graph_payload(self) -> dict[str, Any]:
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
+        if self._highlight_field():
+            for node in self.graph.nodes:
+                if not self._is_highlighted(node):
+                    colours[node] = "#33415c"
         labelled = self._labelled()
         nodes = []
         for node, data in self.graph.nodes(data=True):

@@ -118,7 +118,7 @@ def test_mcp_handshake_and_tool_list():
     names = {tool["name"] for tool in listed["result"]["tools"]}
     assert names == {
         "get_state", "set_spec", "filter", "layout", "color_by", "ego", "path",
-        "describe", "reset", "centrality", "community", "select",
+        "describe", "reset", "centrality", "community", "select", "highlight",
         "render_png", "reload_graph",
     }
 
