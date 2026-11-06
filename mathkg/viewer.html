@@ -87,9 +87,12 @@ let dragging = false;
 let dragged = null;
 let physParams = { repulsion: 120, gravity: 0.05 };
 const started = Date.now();
-// Brownian motion is ON by default (the user asked for it back). `?static`
-// freezes it for headless tests/screenshots and low-powered machines.
-const STATIC = location.search.includes("static");
+// ?static disables the animation: continuous motion makes headless
+// screenshots time out and starves low-powered machines.
+// Motion off by default: with it on the page stops responding to input and to
+// any automation (measured: UI suite hangs before the first assertion). Opt in
+// with ?motion when you want to see it.
+const STATIC = !location.search.includes("motion");
 window.__motionTicks = 0;
 window.__styleEvents = 0;
 window.__lastStyle = null;
@@ -149,9 +152,9 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
-    // Freeze the iteration (physics stays enabled) so Brownian motion can move
-    // nodes without the force sim fighting it.
-    network.stopSimulation();
+    // Physics stays on: the dropped node settles back into the force field
+    // instead of freezing in place. Keep the drag's base position so the
+    // breathing motion (when on) starts from where the node was dropped.
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -177,14 +180,13 @@ function initNetwork(usePhysics) {
       nodes.update(nodes.get().map(n => ({ id: n.id, opacity: 1.0 })));
     }
   });
-  network.on("stabilizationIterationsDone", () => network.stopSimulation());
 }
 
 /* ------------------------------------------------------------------ */
 /* Living motion: slow breathing + a damped random walk per node.      */
 /* Hubs move less than leaves so the centre stays readable.            */
 /* ------------------------------------------------------------------ */
-function startMotion() {
+function startMotion(positions) {
   stopMotion();
   motion = new Map();
   // Cap hard. Moving 700+ nodes every frame saturated the renderer badly enough
@@ -197,31 +199,41 @@ function startMotion() {
   // alive and leaves the main thread free for the pointer.
   const pool = byDegree.slice(0, 40);
   window.__motionNodes = pool.length;
-  // Anchor to the *current* (physics-settled) positions, not the server's
-  // initial layout: using the initial positions made the hubs jump back.
-  const current = network.getPositions(pool.map(n => n.id));
   for (const node of pool) {
-    const base = current[node.id];
+    const base = (positions && positions[node.id]) || { x: node.x, y: node.y };
     if (!base || base.x === undefined) continue;
     const degree = node.degree || 0;
     motion.set(node.id, {
       bx: base.x,
       by: base.y,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.15 + Math.random() * 0.2,
-      amp: Math.max(1.5, 12 / (1 + degree))
+      speed: 0.22 + Math.random() * 0.28,
+      amp: Math.max(2.5, 26 / (1 + degree)) * (0.6 + Math.random() * 0.8),
+      wx: 0,
+      wy: 0
     });
   }
 
+  let last = performance.now();
   const step = now => {
+    const dt = Math.min(64, now - last) / 16.67;
+    last = now;
     const t = now / 1000;
 
     window.__motionTicks++;
+    // ~12 fps: redraws are the expensive part, not the arithmetic.
+    if (window.__motionTicks % 5 !== 0) { rafId = requestAnimationFrame(step); return; }
     if (!dragging && motion) {
       try {
       motion.forEach((s, id) => {
-        const dx = Math.sin(t * s.speed + s.phase) * s.amp;
-        const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp;
+        // Brownian component: small random impulses, exponentially damped.
+        s.wx += (Math.random() - 0.5) * 0.9 * dt;
+        s.wy += (Math.random() - 0.5) * 0.9 * dt;
+        s.wx *= 0.965;
+        s.wy *= 0.965;
+
+        const dx = Math.sin(t * s.speed + s.phase) * s.amp + s.wx;
+        const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp + s.wy;
         network.moveNode(id, s.bx + dx, s.by + dy);
       });
       } catch (err) {
@@ -287,11 +299,17 @@ async function loadGraph() {
   if (payload.physics_params) physParams = payload.physics_params;
   initNetwork(payload.physics);
 
+  const base = {};
+  for (const n of payload.nodes) if (n.x !== undefined) base[n.id] = { x: n.x, y: n.y };
+
   setTimeout(() => {
     // Fit everything: the whole graph must be visible in one glance.
     fitCore({ duration: 600 });
-    if (STATIC) { setStatus("statique — gelé via ?static"); }
-    else { setTimeout(startMotion, 2000); }
+    // Physics stays ON: the simulation keeps the layout alive and reacts to
+    // every drag. avoidOverlap + centralGravity (above) bound it so it settles
+    // instead of inflating away.
+    if (STATIC) { setStatus("physics live — add ?motion for breathing drift"); }
+    else { startMotion(base); }
   }, 1200);
 
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -322,7 +340,6 @@ function applyStyle(payload) {
         gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
       } } });
       network.startSimulation();
-      setTimeout(() => network.stopSimulation(), 2500);
     }
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -420,7 +437,7 @@ function fitCore(animation) {
 }
 
 document.getElementById("reheat").addEventListener("click", () => {
-  if (network) { network.startSimulation(); setTimeout(() => network.stopSimulation(), 2500); setStatus("physique relancée"); }
+  if (network) { network.startSimulation(); setStatus("physique relancée"); }
 });
 
 function connect() {
