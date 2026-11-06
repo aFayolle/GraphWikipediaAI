@@ -199,8 +199,11 @@ function startMotion(positions) {
   // alive and leaves the main thread free for the pointer.
   const pool = byDegree.slice(0, 40);
   window.__motionNodes = pool.length;
+  // Anchor to the current (physics-settled) position, then move only the fixed
+  // (display) coordinates fx/fy: the physics never sees the brownian drift.
+  const current = network.getPositions(pool.map(n => n.id));
   for (const node of pool) {
-    const base = (positions && positions[node.id]) || { x: node.x, y: node.y };
+    const base = current[node.id];
     if (!base || base.x === undefined) continue;
     const degree = node.degree || 0;
     motion.set(node.id, {
@@ -234,7 +237,7 @@ function startMotion(positions) {
 
         const dx = Math.sin(t * s.speed + s.phase) * s.amp + s.wx;
         const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp + s.wy;
-        network.moveNode(id, s.bx + dx, s.by + dy);
+        nodes.update({ id, fx: s.bx + dx, fy: s.by + dy });
       });
       } catch (err) {
         // A single failure must not stop the animation silently.
