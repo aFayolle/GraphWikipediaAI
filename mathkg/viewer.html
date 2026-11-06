@@ -149,9 +149,6 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
-    // Freeze once the drag ends: the dropped node stays put and Brownian motion
-    // (not the force sim) takes over the "alive" feel.
-    freezePhysics();
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -183,7 +180,7 @@ function initNetwork(usePhysics) {
 /* Living motion: slow breathing + a damped random walk per node.      */
 /* Hubs move less than leaves so the centre stays readable.            */
 /* ------------------------------------------------------------------ */
-function startMotion(positions) {
+function startMotion() {
   stopMotion();
   motion = new Map();
   // Cap hard. Moving 700+ nodes every frame saturated the renderer badly enough
@@ -196,8 +193,11 @@ function startMotion(positions) {
   // alive and leaves the main thread free for the pointer.
   const pool = byDegree.slice(0, 40);
   window.__motionNodes = pool.length;
+  // Anchor to the *current* (physics-settled) positions, not the server's
+  // initial layout: using the initial positions made the hubs jump back.
+  const current = network.getPositions(pool.map(n => n.id));
   for (const node of pool) {
-    const base = (positions && positions[node.id]) || { x: node.x, y: node.y };
+    const base = current[node.id];
     if (!base || base.x === undefined) continue;
     const degree = node.degree || 0;
     motion.set(node.id, {
@@ -249,21 +249,6 @@ function stopMotion() {
   motion = null;
 }
 
-function freezePhysics() {
-  if (network) {
-    network.stopSimulation();
-    network.setOptions({ physics: { enabled: false } });
-  }
-}
-
-function reheat() {
-  if (network) {
-    network.setOptions({ physics: { enabled: true } });
-    network.startSimulation();
-    setTimeout(freezePhysics, 2500);
-  }
-}
-
 /* ------------------------------------------------------------------ */
 
 function setStatus(text) { document.getElementById("status").textContent = text; }
@@ -311,17 +296,11 @@ async function loadGraph() {
   if (payload.physics_params) physParams = payload.physics_params;
   initNetwork(payload.physics);
 
-  const base = {};
-  for (const n of payload.nodes) if (n.x !== undefined) base[n.id] = { x: n.x, y: n.y };
-
   setTimeout(() => {
     // Fit everything: the whole graph must be visible in one glance.
     fitCore({ duration: 600 });
-    // Settle then FREEZE: Brownian motion (not the force sim) gives the alive
-    // feel, so the layout stays bounded instead of inflating away.
-    freezePhysics();
     if (STATIC) { setStatus("statique — gelé via ?static"); }
-    else { startMotion(base); }
+    else { setTimeout(startMotion, 2000); }
   }, 1200);
 
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -351,7 +330,7 @@ function applyStyle(payload) {
       network.setOptions({ physics: { forceAtlas2Based: {
         gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
       } } });
-      reheat();
+      network.startSimulation();
     }
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -449,8 +428,7 @@ function fitCore(animation) {
 }
 
 document.getElementById("reheat").addEventListener("click", () => {
-  reheat();
-  setStatus("physique relancée");
+  if (network) { network.startSimulation(); setStatus("physique relancée"); }
 });
 
 function connect() {
