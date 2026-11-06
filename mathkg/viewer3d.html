@@ -46,9 +46,9 @@
       .nodeVal(d => Math.max(1.2, d.size / 6))
       .nodeLabel(d => d.name)
       .nodeOpacity(0.9)
-      .linkColor(() => 'rgba(255,255,255,0.16)')
-      .linkWidth(0.4)
-      .linkOpacity(0.5)
+      .linkColor(() => 'rgba(180,205,255,0.55)')
+      .linkWidth(0.8)
+      .linkOpacity(0.9)
       .d3Force('charge').strength(-80)
       .d3Force('link').distance(26)
       .cooldownTicks(Infinity);
