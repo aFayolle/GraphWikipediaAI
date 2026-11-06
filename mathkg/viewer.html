@@ -169,8 +169,15 @@ function initNetwork(usePhysics) {
   });
   network.on("click", params => {
     if (params.nodes.length) {
-      const node = nodes.get(params.nodes[0]);
+      const nodeId = params.nodes[0];
+      const node = nodes.get(nodeId);
       setStatus(`${node.label || node.id} — ${node.title || ""}`);
+      // Highlight the clicked node and its neighbours; dim everything else.
+      const keep = new Set([nodeId, ...network.getConnectedNodes(nodeId)]);
+      nodes.update(nodes.get().map(n => ({ id: n.id, opacity: keep.has(n.id) ? 1.0 : 0.12 })));
+    } else {
+      // Click on empty space: clear the highlight.
+      nodes.update(nodes.get().map(n => ({ id: n.id, opacity: 1.0 })));
     }
   });
 }
