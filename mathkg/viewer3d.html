@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>MathKG — 3D</title>
+<script src="https://unpkg.com/3d-force-graph@1.80.2"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05070c;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #graph3d { position: absolute; inset: 0; }
+  #hud {
+    position: absolute; top: 14px; left: 16px; z-index: 5;
+    color: #cfe0ff; font-size: 12px; line-height: 1.6;
+    background: rgba(8,14,26,.72); border: 1px solid rgba(120,170,255,.14);
+    border-radius: 10px; padding: 11px 15px; pointer-events: none;
+    backdrop-filter: blur(6px);
+  }
+  #hud b { color: #ffffff; }
+  #hud .dim { color: #8ea6c8; }
+</style>
+</head>
+<body>
+<div id="graph3d"></div>
+<div id="hud">
+  <b>MathKG 3D</b> — prototype<br/>
+  <span id="counts" class="dim">…</span><br/>
+  <span class="dim">glisser = pivoter (θ, φ) · molette = zoom (r) · la caméra vise le centre</span>
+</div>
+<script>
+  const el = document.getElementById('graph3d');
+  const Graph = ForceGraph3D()(el)
+    .backgroundColor('#05070c')
+    .showNavInfo(false);
+
+  fetch('/graph').then(r => r.json()).then(payload => {
+    const nodes = payload.nodes.map(n => ({
+      id: n.id,
+      name: n.id,
+      color: n.color,
+      size: n.size,
+    }));
+    const links = payload.edges.map(e => ({ source: e.from, target: e.to }));
+
+    Graph.graphData({ nodes, links })
+      .nodeColor(d => d.color)
+      .nodeVal(d => Math.max(1.2, d.size / 6))
+      .nodeLabel(d => d.name)
+      .nodeOpacity(0.9)
+      .linkColor(() => 'rgba(255,255,255,0.16)')
+      .linkWidth(0.4)
+      .linkOpacity(0.5)
+      .d3Force('charge').strength(-140)
+      .d3Force('link').distance(26);
+
+    document.getElementById('counts').textContent =
+      `${nodes.length} nœuds · ${links.length} arêtes`;
+  });
+</script>
+</body>
+</html>

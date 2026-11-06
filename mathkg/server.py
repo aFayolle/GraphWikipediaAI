@@ -32,6 +32,7 @@ from . import view as view_module
 log = logging.getLogger(__name__)
 
 VIEWER_HTML = Path(__file__).with_name("viewer.html")
+VIEWER3D_HTML = Path(__file__).with_name("viewer3d.html")
 STATIC_FILES = {
     "/lib/vis-network.min.js": ("vis-9.1.2/vis-network.min.js", "application/javascript"),
     "/lib/vis-network.css": ("vis-9.1.2/vis-network.css", "text/css"),
@@ -555,6 +556,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/":
             self._send(200, VIEWER_HTML.read_bytes(), "text/html; charset=utf-8")
+            return
+        if path == "/3d":
+            self._send(200, VIEWER3D_HTML.read_bytes(), "text/html; charset=utf-8")
             return
         if path == "/graph":
             self._send_json(self.state.graph_payload())
