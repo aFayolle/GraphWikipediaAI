@@ -87,12 +87,9 @@ let dragging = false;
 let dragged = null;
 let physParams = { repulsion: 120, gravity: 0.05 };
 const started = Date.now();
-// ?static disables the animation: continuous motion makes headless
-// screenshots time out and starves low-powered machines.
-// Motion off by default: with it on the page stops responding to input and to
-// any automation (measured: UI suite hangs before the first assertion). Opt in
-// with ?motion when you want to see it.
-const STATIC = !location.search.includes("motion");
+// Brownian motion is ON by default (the user asked for it back). `?static`
+// freezes it for headless tests/screenshots and low-powered machines.
+const STATIC = location.search.includes("static");
 window.__motionTicks = 0;
 window.__styleEvents = 0;
 window.__lastStyle = null;
@@ -308,7 +305,7 @@ async function loadGraph() {
     // Physics stays ON: the simulation keeps the layout alive and reacts to
     // every drag. avoidOverlap + centralGravity (above) bound it so it settles
     // instead of inflating away.
-    if (STATIC) { setStatus("physics live — add ?motion for breathing drift"); }
+    if (STATIC) { setStatus("statique — gelé via ?static"); }
     else { startMotion(base); }
   }, 1200);
 
