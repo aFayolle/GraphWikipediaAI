@@ -328,9 +328,12 @@ function applyStyle(payload) {
   }
   if (payload.physics_params) {
     physParams = payload.physics_params;
-    if (network) network.setOptions({ physics: { forceAtlas2Based: {
-      gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
-    } } });
+    if (network) {
+      network.setOptions({ physics: { forceAtlas2Based: {
+        gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
+      } } });
+      network.startSimulation();
+    }
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
   renderLegend(payload.legend);
@@ -425,6 +428,10 @@ function fitCore(animation) {
   const keep = ranked.slice(0, Math.max(10, Math.ceil(ranked.length * 0.70))).map(pair => pair[0]);
   network.fit({ nodes: keep, animation });
 }
+
+document.getElementById("reheat").addEventListener("click", () => {
+  if (network) { network.startSimulation(); setStatus("physique relancée"); }
+});
 
 function connect() {
   const source = new EventSource("/events");
