@@ -204,13 +204,13 @@ class ViewerState:
         count = len(fields)
         for index, (field, nodes) in enumerate(sorted(fields.items())):
             angle = 2 * _math.pi * index / count
-            cx, cy = 6.0 * _math.cos(angle), 6.0 * _math.sin(angle)
+            cx, cy = 8.0 * _math.cos(angle), 8.0 * _math.sin(angle)
             if len(nodes) == 1:
                 positions[nodes[0]] = (cx, cy)
                 continue
             sub = self.graph.subgraph(nodes)
             try:
-                local = nx.spring_layout(sub, seed=0, scale=1.6, iterations=40)
+                local = nx.spring_layout(sub, seed=0, scale=0.6, iterations=40)
             except Exception:
                 local = {node: (0.0, 0.0) for node in nodes}
             for node, (x, y) in local.items():
