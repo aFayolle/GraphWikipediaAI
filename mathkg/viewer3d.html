@@ -49,33 +49,13 @@
       .linkColor(() => 'rgba(255,255,255,0.16)')
       .linkWidth(0.4)
       .linkOpacity(0.5)
-      .d3Force('charge').strength(-140)
-      .d3Force('link').distance(26);
+      .d3Force('charge').strength(-80)
+      .d3Force('link').distance(26)
+      .cooldownTicks(Infinity);
 
     document.getElementById('counts').textContent =
       `${nodes.length} nœuds · ${links.length} arêtes`;
-
-    startBrownian(Graph);
   });
-
-  // Brownian drift: a subset of hubs wanders slightly so the graph feels alive.
-  function startBrownian(graph, count = 50, amplitude = 1.8) {
-    setTimeout(() => {
-      const all = graph.graphData().nodes || [];
-      const drifting = all.slice()
-        .sort((a, b) => (b.size || 0) - (a.size || 0))
-        .slice(0, count);
-      setInterval(() => {
-        drifting.forEach(n => {
-          if (typeof n.x !== 'number') return;
-          n.x += (Math.random() - 0.5) * amplitude;
-          n.y += (Math.random() - 0.5) * amplitude;
-          n.z += (Math.random() - 0.5) * amplitude;
-        });
-        graph.refresh();
-      }, 90);
-    }, 5000);
-  }
 </script>
 </body>
 </html>

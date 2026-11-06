@@ -149,9 +149,9 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
-    // Physics stays on: the dropped node settles back into the force field
-    // instead of freezing in place. Keep the drag's base position so the
-    // breathing motion (when on) starts from where the node was dropped.
+    // Freeze once the drag ends: the dropped node stays put and Brownian motion
+    // (not the force sim) takes over the "alive" feel.
+    freezePhysics();
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -249,6 +249,21 @@ function stopMotion() {
   motion = null;
 }
 
+function freezePhysics() {
+  if (network) {
+    network.stopSimulation();
+    network.setOptions({ physics: { enabled: false } });
+  }
+}
+
+function reheat() {
+  if (network) {
+    network.setOptions({ physics: { enabled: true } });
+    network.startSimulation();
+    setTimeout(freezePhysics, 2500);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 
 function setStatus(text) { document.getElementById("status").textContent = text; }
@@ -302,9 +317,9 @@ async function loadGraph() {
   setTimeout(() => {
     // Fit everything: the whole graph must be visible in one glance.
     fitCore({ duration: 600 });
-    // Physics stays ON: the simulation keeps the layout alive and reacts to
-    // every drag. avoidOverlap + centralGravity (above) bound it so it settles
-    // instead of inflating away.
+    // Settle then FREEZE: Brownian motion (not the force sim) gives the alive
+    // feel, so the layout stays bounded instead of inflating away.
+    freezePhysics();
     if (STATIC) { setStatus("statique — gelé via ?static"); }
     else { startMotion(base); }
   }, 1200);
@@ -336,7 +351,7 @@ function applyStyle(payload) {
       network.setOptions({ physics: { forceAtlas2Based: {
         gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
       } } });
-      network.startSimulation();
+      reheat();
     }
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -434,7 +449,8 @@ function fitCore(animation) {
 }
 
 document.getElementById("reheat").addEventListener("click", () => {
-  if (network) { network.startSimulation(); setStatus("physique relancée"); }
+  reheat();
+  setStatus("physique relancée");
 });
 
 function connect() {
