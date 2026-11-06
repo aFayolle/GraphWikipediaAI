@@ -395,7 +395,7 @@ EDGE_COLUMNS = {
 LABEL_COLUMNS: set[str] = set()
 
 
-LAYOUTS = {"physics", "installed", "gephi", "layered", "forceatlas2", "spring", "circular", "radial"}
+LAYOUTS = {"physics", "installed", "gephi", "layered", "forceatlas2", "spring", "circular", "radial", "fields"}
 
 
 def validate_spec(spec: dict[str, Any]) -> None:

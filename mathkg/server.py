@@ -172,6 +172,9 @@ class ViewerState:
         if layout == "radial":
             return self._scale(nx.shell_layout(self.graph))
 
+        if layout == "fields":
+            return self._scale(self._grouped_positions())
+
         if layout != "layered":
             log.info("viewer: layout=%s has no server positions (physics on)", layout)
             return {}
@@ -185,6 +188,34 @@ class ViewerState:
             log.warning("layered layout failed (%s); falling back to physics", exc)
             return {}
         return self._scale(positions)
+
+    def _grouped_positions(self) -> dict[str, tuple[float, float]]:
+        """Cluster by field: each domain gets a region on a circle, its nodes
+        spread inside it. Different-coloured nodes therefore end up apart (the
+        'repulsion between different colours' request)."""
+        import math as _math
+
+        fields: dict[str, list[str]] = {}
+        for node in self.graph.nodes:
+            field = str(self.graph.nodes[node].get("field", "")) or "unknown"
+            fields.setdefault(field, []).append(node)
+
+        positions: dict[str, tuple[float, float]] = {}
+        count = len(fields)
+        for index, (field, nodes) in enumerate(sorted(fields.items())):
+            angle = 2 * _math.pi * index / count
+            cx, cy = 6.0 * _math.cos(angle), 6.0 * _math.sin(angle)
+            if len(nodes) == 1:
+                positions[nodes[0]] = (cx, cy)
+                continue
+            sub = self.graph.subgraph(nodes)
+            try:
+                local = nx.spring_layout(sub, seed=0, scale=1.6, iterations=40)
+            except Exception:
+                local = {node: (0.0, 0.0) for node in nodes}
+            for node, (x, y) in local.items():
+                positions[node] = (cx + x, cy + y)
+        return positions
 
     def _installed_positions(self) -> dict[str, tuple[float, float]]:
         from .render import _installed_path, _read_positions_file
