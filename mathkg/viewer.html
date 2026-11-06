@@ -208,17 +208,12 @@ function startMotion() {
       bx: base.x,
       by: base.y,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.22 + Math.random() * 0.28,
-      amp: Math.max(2.5, 26 / (1 + degree)) * (0.6 + Math.random() * 0.8),
-      wx: 0,
-      wy: 0
+      speed: 0.15 + Math.random() * 0.2,
+      amp: Math.max(1.5, 12 / (1 + degree))
     });
   }
 
-  let last = performance.now();
   const step = now => {
-    const dt = Math.min(64, now - last) / 16.67;
-    last = now;
     const t = now / 1000;
 
     window.__motionTicks++;
@@ -227,14 +222,8 @@ function startMotion() {
     if (!dragging && motion) {
       try {
       motion.forEach((s, id) => {
-        // Brownian component: small random impulses, exponentially damped.
-        s.wx += (Math.random() - 0.5) * 0.9 * dt;
-        s.wy += (Math.random() - 0.5) * 0.9 * dt;
-        s.wx *= 0.965;
-        s.wy *= 0.965;
-
-        const dx = Math.sin(t * s.speed + s.phase) * s.amp + s.wx;
-        const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp + s.wy;
+        const dx = Math.sin(t * s.speed + s.phase) * s.amp;
+        const dy = Math.cos(t * s.speed * 0.87 + s.phase * 1.31) * s.amp;
         network.moveNode(id, s.bx + dx, s.by + dy);
       });
       } catch (err) {
