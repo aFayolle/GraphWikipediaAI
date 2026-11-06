@@ -217,8 +217,6 @@ function startMotion() {
     const t = now / 1000;
 
     window.__motionTicks++;
-    // ~12 fps: redraws are the expensive part, not the arithmetic.
-    if (window.__motionTicks % 5 !== 0) { rafId = requestAnimationFrame(step); return; }
     if (!dragging && motion) {
       try {
       motion.forEach((s, id) => {
