@@ -305,6 +305,7 @@ class ViewerState:
             "spec": self.spec,
             "detail": self.detail(),
             "legend": self._legend(colours),
+            "physics_params": self._physics_params(),
             "nodes": [
                 {"id": node, "size": self._size_for(node), "color": colours.get(node, "#4E79A7"),
                  "font_size": self._font_for(node),
@@ -322,6 +323,13 @@ class ViewerState:
 
     def _edge_opacity(self) -> float:
         return float((self.spec.get("edge") or {}).get("opacity", 0.10) or 0.10)
+
+    def _physics_params(self) -> dict[str, float]:
+        p = self.spec.get("physics") or {}
+        return {
+            "repulsion": float(p.get("repulsion", 120)),
+            "gravity": float(p.get("gravity", 0.05)),
+        }
 
     def _edge_width(self, source: str, target: str) -> float:
         row = self._edge_columns.get((source, target))
@@ -375,6 +383,7 @@ class ViewerState:
             "spec": self.spec,
             "detail": self.detail(),
             "legend": self._legend(colours),
+            "physics_params": self._physics_params(),
             "physics": not self._positions,
             "nodes": nodes,
             "edges": edges,

@@ -85,6 +85,7 @@ let motion = null;
 let rafId = null;
 let dragging = false;
 let dragged = null;
+let physParams = { repulsion: 120, gravity: 0.05 };
 const started = Date.now();
 // ?static disables the animation: continuous motion makes headless
 // screenshots time out and starves low-powered machines.
@@ -115,7 +116,7 @@ function initNetwork(usePhysics) {
         // visible without the layout exploding. avoidOverlap + a real central
         // pull keep the layout bounded so the simulation can stay ON after load
         // instead of inflating to sub-pixel.
-        gravitationalConstant: -120, centralGravity: 0.05,
+        gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity,
         springLength: 150, springStrength: 0.12, damping: 0.35,
         avoidOverlap: 0.5
       }
@@ -288,6 +289,7 @@ async function loadGraph() {
     color: e.color ? { color: e.color, opacity: e.opacity ?? 0.30, inherit: false } : undefined
   })));
 
+  if (payload.physics_params) physParams = payload.physics_params;
   initNetwork(payload.physics);
 
   const base = {};
@@ -323,6 +325,12 @@ function applyStyle(payload) {
       id: e.id, width: e.width,
       color: e.color ? { color: e.color, opacity: e.opacity ?? 0.30, inherit: false } : undefined
     })));
+  }
+  if (payload.physics_params) {
+    physParams = payload.physics_params;
+    if (network) network.setOptions({ physics: { forceAtlas2Based: {
+      gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
+    } } });
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
   renderLegend(payload.legend);

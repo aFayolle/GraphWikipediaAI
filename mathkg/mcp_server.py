@@ -27,6 +27,12 @@ PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "mathkg", "version": "2.0.0"}
 DEFAULT_VIEWER = os.environ.get("MATHKG_VIEWER_URL", "http://127.0.0.1:8765")
 
+#: 12 hue-spaced colours for categorical colouring (matches the 04 field spec).
+CATEGORICAL_PALETTE = [
+    "#c24d5d", "#c0571e", "#ac6900", "#897d00", "#508d23", "#009563",
+    "#009496", "#008abc", "#337bd0", "#736ace", "#9b5bb6", "#b6508e",
+]
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "get_state",
@@ -249,12 +255,14 @@ class MathKGClient:
 
     def color_by(self, column: str, mode: str = "numeric",
                  palette: list[str] | None = None, **_kwargs) -> dict:
-        patch = [f"node.color_by.column={column}"]
+        rule: dict[str, Any] = {"column": column}
         if mode:
-            patch.append(f"node.color_by.mode={mode}")
+            rule["mode"] = mode
         if palette:
-            patch.append(f"node.color_by.palette={json.dumps(palette)}")
-        return self._post(self.base, "/spec", {"set": patch})
+            rule["palette"] = palette
+        elif mode == "categorical":
+            rule["palette"] = CATEGORICAL_PALETTE
+        return self._post(self.base, "/spec", {"set": [f"node.color_by={json.dumps(rule)}"]})
 
     def ego(self, node: str, radius: int = 2, **_kwargs) -> dict:
         return self._post(self.base, "/query", {"kind": "ego", "node": node, "radius": radius})

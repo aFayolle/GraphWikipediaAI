@@ -67,6 +67,10 @@ DEFAULT_SPEC: dict[str, Any] = {
         "formula": "confidence",
         "minimum": 0.0,
     },
+    "physics": {
+        "repulsion": 120,        # client-side forceAtlas2 gravitationalConstant magnitude
+        "gravity": 0.05,         # central gravity
+    },
     "filter": {
         "min_degree": 0,
         "kinds": [],
