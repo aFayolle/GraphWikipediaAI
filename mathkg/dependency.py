@@ -272,6 +272,58 @@ def enrich_with_attributes(graph: nx.DiGraph) -> nx.DiGraph:
     return graph
 
 
+def connect_components(graph: nx.DiGraph, links_csv: Path | None = None) -> nx.DiGraph:
+    """Bridge disconnected components to the main one via Wikipedia hyperlinks.
+
+    The prerequisite extraction is sparse, so a chunk of the DAG sits in small
+    components with no prerequisite joining them to the core. Most of those do
+    have a Wikipedia hyperlink to the core, so we add those as low-confidence
+    ``bridge`` edges to collapse the graph toward a single component.
+    """
+    path = Path(links_csv) if links_csv else config.LINKS_CSV
+    if not path.exists():
+        return graph
+
+    links = pd.read_csv(path, dtype=str, keep_default_na=False)
+    linked: dict[str, set[str]] = defaultdict(set)
+    for source, target in zip(links["source"], links["target"]):
+        if source and target:
+            linked[source].add(target)
+            linked[target].add(source)
+
+    components = sorted(
+        nx.connected_components(graph.to_undirected()), key=len, reverse=True
+    )
+    if len(components) <= 1:
+        return graph
+
+    main = set(components[0])
+    added = 0
+    for component in components[1:]:
+        nodes = set(component)
+        if nodes & main:
+            main |= nodes
+            continue
+        bridged = False
+        for node in component:
+            for neighbour in linked.get(node, ()):
+                if neighbour in main:
+                    graph.add_edge(
+                        node, neighbour, relation="bridge", confidence=0.2,
+                        evidence="Wikipedia hyperlink (bridge)",
+                    )
+                    added += 1
+                    bridged = True
+                    break
+            if bridged:
+                break
+        if bridged:
+            main |= nodes
+    if added:
+        log.info("connect_components: %d bridge edges added", added)
+    return graph
+
+
 # --------------------------------------------------------------------------- #
 # Queries
 # --------------------------------------------------------------------------- #

@@ -244,6 +244,7 @@ def _graph_for_spec(spec: dict) -> nx.Graph:
     # different fingerprint and silently ignored an installed layout.
     dag = dependency.break_cycles(_dag())[0]
     dag = dependency.enrich_with_attributes(dag)
+    dag = dependency.connect_components(dag)
     return _attach_field(dag)
 
 

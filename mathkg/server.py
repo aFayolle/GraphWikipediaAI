@@ -61,6 +61,7 @@ def build_dependency_graph() -> nx.DiGraph:
     dag = dependency.build_dag(frame, titles=set(titles))
     dag, _ = dependency.break_cycles(dag)
     dag = dependency.enrich_with_attributes(dag)
+    dag = dependency.connect_components(dag)
     field_csv = config.PROJECT_ROOT / "reports" / "llm_fields.csv"
     if field_csv.exists():
         fields = pd.read_csv(field_csv, dtype=str, keep_default_na=False)
