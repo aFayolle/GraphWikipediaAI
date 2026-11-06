@@ -161,7 +161,7 @@ def run(
     owns_session = session is None
     session = session or PolitenessSession()
     try:
-        nodes = dump_sparql(queries.WIKIPROJECT_MATHEMATICS, out_nodes, session=session)
+        nodes = dump_sparql(queries.BROAD_MATHEMATICS, out_nodes, session=session)
         fields = dump_sparql(
             queries.FIELDS_OF_MATHEMATICS, out_fields, page_size=50, session=session
         )

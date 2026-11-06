@@ -55,6 +55,55 @@ WHERE {
 ORDER BY ?item
 """
 
+# Broad / exhaustive set: everything maintained by WikiProject Mathematics, plus
+# anything classified directly as a mathematical object, concept, theorem, axiom
+# or structure. Wider than P6104 alone (which only marks *maintainership*); the
+# extras are candidates to be pruned by hand afterwards. Transitive P279* was
+# deliberately NOT used: it times out on the public endpoint.
+BROAD_MATHEMATICS = PREFIXES + """
+SELECT DISTINCT
+  ?item
+  ?qid
+  ?itemLabel
+  ?enUrl
+  ?sitelinks
+  ?statements
+WHERE {
+  {
+    ?item wdt:P6104 wd:Q8487137 .
+  } UNION {
+    VALUES ?root {
+      wd:Q246672   # mathematical object
+      wd:Q24034552 # mathematical concept
+      wd:Q65943    # theorem
+      wd:Q597359   # axiom
+      wd:Q748349   # mathematical structure
+    }
+    { ?item wdt:P31 ?root . } UNION { ?item wdt:P279 ?root . }
+  }
+
+  # Exclude humans
+  FILTER NOT EXISTS { ?item wdt:P31 wd:Q5 }
+
+  BIND(STRAFTER(STR(?item), "entity/") AS ?qid)
+
+  ?item wikibase:sitelinks ?sitelinks .
+  ?item wikibase:statements ?statements .
+
+  OPTIONAL {
+    ?enArticle schema:about ?item ;
+               schema:isPartOf <https://en.wikipedia.org/> ;
+               schema:name ?enTitle .
+    BIND(STR(?enArticle) AS ?enUrl)
+  }
+
+  SERVICE wikibase:label {
+    bd:serviceParam wikibase:language "en" .
+  }
+}
+ORDER BY ?item
+"""
+
 # One item per "field of mathematics": the colour anchors.
 FIELDS_OF_MATHEMATICS = PREFIXES + """
 SELECT DISTINCT
