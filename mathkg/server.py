@@ -288,12 +288,13 @@ class ViewerState:
         colours = view_module.node_colors(self.graph, self.spec, self._node_columns)
         labelled = self._labelled()
         edges = [
-            {"id": f"{source}\u0000{target}", "width": self._edge_width(source, target)}
+            {"id": f"{source}\u0000{target}", "width": self._edge_width(source, target),
+             "color": self._edge_color(), "opacity": self._edge_opacity()}
             for source, target in self.graph.edges
         ]
-        # Edge widths only change when the weight formula does, so omit them
-        # otherwise: that halves the message for a pure node-size change.
-        fingerprint = json.dumps([edge["width"] for edge in edges])
+        # Edge style only changes when the weight formula or colour does, so omit
+        # them otherwise: that halves the message for a pure node-size change.
+        fingerprint = json.dumps([(edge["width"], edge["color"], edge["opacity"]) for edge in edges])
         changed_edges = edges if fingerprint != self._last_edge_style else []
         self._last_edge_style = fingerprint
 
@@ -314,6 +315,13 @@ class ViewerState:
             ],
             "edges": changed_edges,
         }
+
+    def _edge_color(self) -> str:
+        """Edge colour from the spec (hex). Sent to the viewer for every edge."""
+        return str((self.spec.get("edge") or {}).get("color", "") or "")
+
+    def _edge_opacity(self) -> float:
+        return float((self.spec.get("edge") or {}).get("opacity", 0.10) or 0.10)
 
     def _edge_width(self, source: str, target: str) -> float:
         row = self._edge_columns.get((source, target))
@@ -356,6 +364,8 @@ class ViewerState:
                 "from": source,
                 "to": target,
                 "width": self._edge_width(source, target),
+                "color": self._edge_color(),
+                "opacity": self._edge_opacity(),
                 "evidence": str(data.get("evidence", "")),
             }
             for source, target, data in self.graph.edges(data=True)

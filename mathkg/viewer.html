@@ -284,7 +284,8 @@ async function loadGraph() {
     font: { size: n.font_size, color: n.font_color || LABEL, strokeWidth: 1.2, strokeColor: BG }
   })));
   edges = new vis.DataSet(payload.edges.map(e => ({
-    id: e.id, from: e.from, to: e.to, width: e.width, title: e.evidence || ""
+    id: e.id, from: e.from, to: e.to, width: e.width, title: e.evidence || "",
+    color: e.color ? { color: e.color, opacity: e.opacity ?? 0.30 } : undefined
   })));
 
   initNetwork(payload.physics);
@@ -318,7 +319,10 @@ function applyStyle(payload) {
     font: { size: n.font_size, color: n.font_color || LABEL, strokeWidth: 1.2, strokeColor: BG }
   })));
   if (payload.edges && payload.edges.length) {
-    edges.update(payload.edges.map(e => ({ id: e.id, width: e.width })));
+    edges.update(payload.edges.map(e => ({
+      id: e.id, width: e.width,
+      color: e.color ? { color: e.color, opacity: e.opacity ?? 0.30 } : undefined
+    })));
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
   renderLegend(payload.legend);
