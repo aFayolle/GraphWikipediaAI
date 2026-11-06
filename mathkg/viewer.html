@@ -149,6 +149,9 @@ function initNetwork(usePhysics) {
   });
   network.on("dragEnd", params => {
     dragging = false;
+    // Freeze the iteration (physics stays enabled) so Brownian motion can move
+    // nodes without the force sim fighting it.
+    network.stopSimulation();
     if (dragged && motion && motion.has(dragged)) {
       const p = network.getPositions([dragged])[dragged];
       if (p) {
@@ -174,6 +177,7 @@ function initNetwork(usePhysics) {
       nodes.update(nodes.get().map(n => ({ id: n.id, opacity: 1.0 })));
     }
   });
+  network.on("stabilizationIterationsDone", () => network.stopSimulation());
 }
 
 /* ------------------------------------------------------------------ */
@@ -331,6 +335,7 @@ function applyStyle(payload) {
         gravitationalConstant: -physParams.repulsion, centralGravity: physParams.gravity
       } } });
       network.startSimulation();
+      setTimeout(() => network.stopSimulation(), 2500);
     }
   }
   setHud(payload.spec, payload.nodes.length, payload.edges.length, payload.detail);
@@ -428,7 +433,7 @@ function fitCore(animation) {
 }
 
 document.getElementById("reheat").addEventListener("click", () => {
-  if (network) { network.startSimulation(); setStatus("physique relancée"); }
+  if (network) { network.startSimulation(); setTimeout(() => network.stopSimulation(), 2500); setStatus("physique relancée"); }
 });
 
 function connect() {
