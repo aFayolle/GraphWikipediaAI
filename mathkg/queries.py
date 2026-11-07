@@ -73,7 +73,6 @@ WHERE {
     ?item wdt:P6104 wd:Q8487137 .
   } UNION {
     VALUES ?root {
-      wd:Q246672   # mathematical object
       wd:Q24034552 # mathematical concept
       wd:Q65943    # theorem
       wd:Q597359   # axiom
