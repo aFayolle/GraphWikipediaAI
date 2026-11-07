@@ -32,7 +32,7 @@ class PolitenessSession:
         user_agent: str | None = None,
         min_interval: float = config.MIN_REQUEST_INTERVAL,
         max_retries: int = config.MAX_RETRIES,
-        timeout: float = 60.0,
+        timeout: float = 300.0,
         sleep=time.sleep,
         clock=time.monotonic,
     ) -> None:
