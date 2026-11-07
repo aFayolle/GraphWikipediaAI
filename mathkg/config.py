@@ -47,7 +47,7 @@ WIKI_API_URL = "https://{lang}.wikipedia.org/w/api.php"
 
 # Politeness: one request at a time, with a floor between requests.
 MIN_REQUEST_INTERVAL = 0.5   # seconds between two API calls
-MAX_RETRIES = 5
+MAX_RETRIES = 10
 TITLES_PER_REQUEST = 20      # extracts are limited to 20 titles per query
 
 # --------------------------------------------------------------------------- #

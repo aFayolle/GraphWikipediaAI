@@ -70,7 +70,7 @@ class PolitenessSession:
         if retry_after is not None:
             delay = retry_after
         else:
-            delay = min(2 ** attempt, 60) * (0.5 + random.random() / 2)
+            delay = min(2 ** attempt, 120) * (0.5 + random.random() / 2)
         self._sleep(delay)
 
     # -- public API --------------------------------------------------------- #
