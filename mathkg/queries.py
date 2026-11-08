@@ -23,7 +23,7 @@ PREFIX bd:  <http://www.bigdata.com/rdf#>
 # contains non-mathematical items (e.g. Q13 triskaidekaphobia, Q11413 go). Use
 # the `filter` stage if you need a cleaner set.
 WIKIPROJECT_MATHEMATICS = PREFIXES + """
-SELECT DISTINCT
+SELECT
   ?item
   ?qid
   ?itemLabel
@@ -60,7 +60,7 @@ ORDER BY ?item
 # extras are candidates to be pruned by hand afterwards. Transitive P279* was
 # deliberately NOT used: it times out on the public endpoint.
 BROAD_MATHEMATICS = PREFIXES + """
-SELECT DISTINCT
+SELECT
   ?item
   ?qid
   ?itemLabel
@@ -85,9 +85,6 @@ WHERE {
 
   BIND(STRAFTER(STR(?item), "entity/") AS ?qid)
 
-  ?item wikibase:sitelinks ?sitelinks .
-  ?item wikibase:statements ?statements .
-
   OPTIONAL {
     ?enArticle schema:about ?item ;
                schema:isPartOf <https://en.wikipedia.org/> ;
@@ -97,12 +94,11 @@ WHERE {
 
   OPTIONAL { ?item rdfs:label ?itemLabel . FILTER(LANG(?itemLabel) = "en") }
 }
-ORDER BY ?item
 """
 
 # One item per "field of mathematics": the colour anchors.
 FIELDS_OF_MATHEMATICS = PREFIXES + """
-SELECT DISTINCT
+SELECT
   ?item
   ?qid
   ?itemLabel
