@@ -8,7 +8,9 @@ Fixes over the original ``download_raw_data.py``:
   never used it);
 * the consolidated CSV is written atomically (``write`` + ``os.replace``);
 * rows are de-duplicated on ``qid`` at the end, which OFFSET paging can no
-  longer violate anyway.
+  longer violate anyway;
+* the broad query is split into independent arms (see ``dump_sparql_many``)
+  because the single mega-UNION was too large for the endpoint to sort.
 """
 
 from __future__ import annotations
@@ -108,6 +110,46 @@ def dump_sparql(
             session.close()
 
 
+def dump_sparql_many(
+    queries_: tuple[str, ...] | list[str],
+    out_csv: Path,
+    page_size: int = 500,
+    endpoint: str = config.WIKIDATA_ENDPOINT,
+    session: PolitenessSession | None = None,
+    max_pages: int | None = None,
+) -> Path:
+    """Page through several SPARQL queries and merge them into one CSV.
+
+    ``queries.BROAD_MATHEMATICS`` is split into independent arms (see
+    :mod:`mathkg.queries`): the single UNION matched hundreds of thousands of
+    rows and the endpoint refused to sort them for paging. Each arm is fetched
+    separately -- into its own cache dir, so pages are reused on re-runs -- and
+    the consolidated results are merged here, de-duplicated on ``qid``.
+    """
+    config.ensure_dirs()
+    out_csv = Path(out_csv)
+    merge_dir = config.CACHE_DIR / "wdqs" / "_merged"
+    merge_dir.mkdir(parents=True, exist_ok=True)
+
+    frames = []
+    for query in queries_:
+        arm_csv = merge_dir / f"{_query_slug(query)}.csv"
+        dump_sparql(
+            query,
+            arm_csv,
+            page_size=page_size,
+            endpoint=endpoint,
+            session=session,
+            max_pages=max_pages,
+        )
+        frames.append(
+            pd.read_csv(arm_csv, dtype=str, keep_default_na=False, encoding="utf-8")
+        )
+
+    df = pd.concat(frames, ignore_index=True)
+    return _finalise(df, out_csv, label=f"merged {len(queries_)} arms")
+
+
 def _write_page(path: Path, rows: list[dict[str, str]]) -> None:
     tmp = path.with_suffix(".csv.tmp")
     with open(tmp, "w", newline="", encoding="utf-8") as fh:
@@ -122,6 +164,23 @@ def _read_page(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
+def _finalise(df: pd.DataFrame, out_csv: Path, label: str = "nodes") -> Path:
+    """De-duplicate on ``qid``, sort, and write ``df`` to ``out_csv``."""
+    before = len(df)
+    df = df[df["qid"] != ""].drop_duplicates(subset="qid", keep="first")
+    df = df.sort_values("qid").reset_index(drop=True)
+
+    df.to_csv(out_csv, index=False, encoding="utf-8")
+    log.info(
+        "%s: %d rows (%d duplicates dropped) -> %s",
+        label,
+        len(df),
+        before - len(df),
+        out_csv,
+    )
+    return out_csv
+
+
 def _consolidate(page_dir: Path, out_csv: Path) -> Path:
     """Merge every page file into one CSV, atomically and de-duplicated."""
     frames = [
@@ -132,18 +191,7 @@ def _consolidate(page_dir: Path, out_csv: Path) -> Path:
         raise RuntimeError(f"no SPARQL pages found in {page_dir}")
 
     df = pd.concat(frames, ignore_index=True)
-    before = len(df)
-    df = df[df["qid"] != ""].drop_duplicates(subset="qid", keep="first")
-    df = df.sort_values("qid").reset_index(drop=True)
-
-    df.to_csv(out_csv, index=False, encoding="utf-8")
-    log.info(
-        "nodes: %d rows (%d duplicates dropped) -> %s",
-        len(df),
-        before - len(df),
-        out_csv,
-    )
-    return out_csv
+    return _finalise(df, out_csv)
 
 
 def run(
@@ -151,7 +199,7 @@ def run(
     out_fields: Path = config.FIELDS_CSV,
     session: PolitenessSession | None = None,
 ) -> tuple[Path, Path]:
-    """Fetch both the WikiProject Mathematics items and the 12 field anchors."""
+    """Fetch the broad mathematics items (split into arms) and 12 field anchors."""
     if not config.contact_is_set():
         log.warning(
             "MATHKG_CONTACT is not set: the User-Agent carries a placeholder. "
@@ -161,7 +209,7 @@ def run(
     owns_session = session is None
     session = session or PolitenessSession()
     try:
-        nodes = dump_sparql(queries.BROAD_MATHEMATICS, out_nodes, session=session)
+        nodes = dump_sparql_many(queries.BROAD_MATHEMATICS, out_nodes, session=session)
         fields = dump_sparql(
             queries.FIELDS_OF_MATHEMATICS, out_fields, page_size=50, session=session
         )
