@@ -42,7 +42,7 @@ FIELDS_CSV = RAW_DIR / "fields.csv"  # the 12 anchor "fields of mathematics"
 WIKI_CONTACT = os.environ.get("MATHKG_CONTACT", "").strip()
 
 WIKI_LANG = "en"
-WIKIDATA_ENDPOINT = "https://query.wikidata.org/sparql"
+WIKIDATA_ENDPOINT = "https://qlever.dev/api/wikidata"
 WIKI_API_URL = "https://{lang}.wikipedia.org/w/api.php"
 
 # Politeness: one request at a time, with a floor between requests.

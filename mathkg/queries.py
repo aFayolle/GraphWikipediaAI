@@ -12,6 +12,7 @@ from __future__ import annotations
 PREFIXES = """
 PREFIX wd:  <http://www.wikidata.org/entity/>
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX schema: <http://schema.org/>
 PREFIX wikibase: <http://wikiba.se/ontology#>
 PREFIX bd:  <http://www.bigdata.com/rdf#>
@@ -48,9 +49,7 @@ WHERE {
     BIND(STR(?enArticle) AS ?enUrl)
   }
 
-  SERVICE wikibase:label {
-    bd:serviceParam wikibase:language "en" .
-  }
+  OPTIONAL { ?item rdfs:label ?itemLabel . FILTER(LANG(?itemLabel) = "en") }
 }
 ORDER BY ?item
 """
@@ -96,9 +95,7 @@ WHERE {
     BIND(STR(?enArticle) AS ?enUrl)
   }
 
-  SERVICE wikibase:label {
-    bd:serviceParam wikibase:language "en" .
-  }
+  OPTIONAL { ?item rdfs:label ?itemLabel . FILTER(LANG(?itemLabel) = "en") }
 }
 ORDER BY ?item
 """
@@ -137,7 +134,7 @@ WHERE {
            schema:isPartOf <https://en.wikipedia.org/> .
   }
 
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "en". }
+  OPTIONAL { ?item rdfs:label ?itemLabel . FILTER(LANG(?itemLabel) = "en") }
 }
 ORDER BY ?itemLabel
 """
